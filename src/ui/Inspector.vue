@@ -10,6 +10,7 @@ import { turnKindByAngle } from '../engine/network';
 import { seedRng, rngNext } from '../engine/rng';
 import type { SandboxNode } from '../engine/sandbox';
 import { PED_COLOR, PED_GROUPS_DEFAULT, reconcile } from '../engine/generate';
+import { defaultSpawnDrivers } from '../engine/model';
 
 const props = defineProps<{ ctx?: Ctx }>();
 const C = useCtx(() => props.ctx);
@@ -76,6 +77,16 @@ function setTwoRows(on: boolean) {
   if (!a) return;
   if (on) delete a.twoRows;
   else a.twoRows = false;
+}
+const DRIVER_ROWS: Array<[keyof NonNullable<import('../engine/types').SpawnerParams['drivers']>, string, number]> = [
+  ['accel', 'Ускорение легковых, м/с²', 0.1], ['speed', 'Желаемая скорость, доля от разрешённой', 0.05],
+  ['headway', 'Интервал до впереди идущей, с', 0.1], ['gap', 'Расстояние до стоящей впереди, м', 0.1], ['reaction', 'Время реакции, с', 0.1],
+];
+function toggleSpawnDrivers(on: boolean) {
+  const sp = spawner.value;
+  if (!sp) return;
+  if (on) sp.params.drivers = defaultSpawnDrivers(cfg.value.sim);
+  else delete sp.params.drivers;
 }
 function deleteConn() {
   const c = connSel.value;
@@ -293,6 +304,22 @@ function setWeight(dest: ArmId, lane: number, v: number) {
         <label>Интенсивность, авт/ч <input v-model.number="spawner.params.rate" type="number" min="0" step="10" /></label>
         <label v-if="spawner.params.arrival === 'platoon'">Машин в пачке <input v-model.number="spawner.params.platoonSize" type="number" min="1" max="20" /></label>
       </div>
+      <details class="sub">
+        <summary>Водители этого подхода: {{ spawner.params.drivers ? 'свои параметры' : 'общие из настроек' }}</summary>
+        <label class="check"><input type="checkbox" :checked="!!spawner.params.drivers" @change="toggleSpawnDrivers(($event.target as HTMLInputElement).checked)" /> Свои параметры водителей</label>
+        <div v-if="spawner.params.drivers" class="table-scroll">
+          <table class="tbl">
+            <tr><th>Параметр</th><th>от</th><th>до</th><th>распределение</th></tr>
+            <tr v-for="[k, label, step] in DRIVER_ROWS" :key="k">
+              <td>{{ label }}</td>
+              <td><input v-model.number="spawner.params.drivers[k].min" type="number" :step="step" min="0" style="width: 64px" /></td>
+              <td><input v-model.number="spawner.params.drivers[k].max" type="number" :step="step" min="0" style="width: 64px" /></td>
+              <td><select v-model="spawner.params.drivers[k].dist"><option value="uniform">равномерное</option><option value="normal">нормальное</option><option value="triangular">треугольное</option></select></td>
+            </tr>
+          </table>
+        </div>
+        <div class="small muted">Каждая новая машина получает значения из этих диапазонов. Нормальное распределение — среднее посередине, диапазон ±3σ. Грузовые и автобусы разгоняются с общим ускорением тяжёлых машин из настроек.</div>
+      </details>
       <details class="sub">
         <summary>Профиль интенсивности по времени, точек: {{ spawner.params.profile.length }}</summary>
         <div v-for="(r, i) in spawner.params.profile" :key="i" class="row gap">

@@ -45,6 +45,11 @@ export const KOLPINO_CONNECTIONS = [
   // С юга: прямо, налево, направо
   conn('S', 0, 'N', 0), conn('S', 0, 'W', 0), conn('S', 0, 'E', 1),
 ];
+/** Дополнительные траектории направлений: обход и движение в два ряда, как ездят на этом перекрёстке */
+const KOLPINO_VARIANTS: Record<string, Array<{ shiftIn: number; bend: number }>> = {'W0-N0': [{shiftIn: -1, bend: -1}, {shiftIn: 1, bend: 1}], 'W0-E0': [{shiftIn: -1, bend: -1}, {shiftIn: 1, bend: 1}], 'W1-E1': [{shiftIn: -1, bend: -1}, {shiftIn: 1, bend: 1}], 'W2-S0': [{shiftIn: -1, bend: 1}, {shiftIn: 1, bend: 1}], 'E0-S0': [{shiftIn: -1, bend: 0}, {shiftIn: 1, bend: -5}], 'E0-W0': [{shiftIn: -1, bend: -1}, {shiftIn: 1, bend: 1}], 'E1-W1': [{shiftIn: -1, bend: -1}, {shiftIn: 1, bend: 1}], 'E2-N0': [{shiftIn: -1, bend: 0}, {shiftIn: 1.1, bend: 1}], 'N0-S0': [{shiftIn: -1, bend: -2}, {shiftIn: 1, bend: 2}], 'N0-W2': [{shiftIn: -1, bend: 0}, {shiftIn: 1, bend: 1}], 'S0-N0': [{shiftIn: -2.1, bend: -2.6}, {shiftIn: 1.5, bend: 2}], 'S0-E1': [{shiftIn: -1, bend: 0}, {shiftIn: 1, bend: 0}]};
+// на полосах Оборонной 3,6–3,75 м рядом не помещаются две машины, там водители едут по основной траектории с неявным разбросом
+for (const c of KOLPINO_CONNECTIONS) if (KOLPINO_VARIANTS[c.id] && (c.from.arm === 'N' || c.from.arm === 'S')) c.variants = KOLPINO_VARIANTS[c.id].map((x) => ({ ...x }));
+
 
 const groups = (sizes = PED_GROUPS_DEFAULT) => sizes.map((g) => ({ ...g }));
 

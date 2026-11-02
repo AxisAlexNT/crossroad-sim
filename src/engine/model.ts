@@ -127,6 +127,31 @@ function fixSpawner(p: Raw): SpawnerParams | null {
     platoonSize: clampInt(p.platoonSize, 4, 1, 50),
     destinations: numRecord(p.destinations, LIMITS.arms),
     types: types.length ? types : [{ kind: 'car', share: 1, lengthMin: 4.2, lengthMax: 4.9 }],
+    ...(isObj(p.drivers) ? { drivers: fixSpawnDrivers(p.drivers) } : {}),
+  };
+}
+
+/** Диапазоны параметров водителей узла появления */
+function fixSpawnDrivers(d: Raw): NonNullable<SpawnerParams['drivers']> {
+  const r = (x: unknown, dmin: number, dmax: number, lo: number, hi: number) => {
+    const o = isObj(x) ? x : {};
+    const min = clampNum(o.min, dmin, lo, hi);
+    return { min, max: clampNum(o.max, Math.max(min, dmax), min, hi), dist: (o.dist === 'normal' || o.dist === 'triangular' ? o.dist : 'uniform') as 'uniform' | 'normal' | 'triangular' };
+  };
+  const D = SIM_DEFAULT.drivers;
+  return {
+    accel: r(d.accel, D.accelMin, D.accelMax, 0.3, 6), speed: r(d.speed, D.speedMin, D.speedMax, 0.3, 1.5),
+    headway: r(d.headway, D.headwayMin, D.headwayMax, 0.4, 4), gap: r(d.gap, D.gap, D.gap, 0.5, 5), reaction: r(d.reaction, D.reactionMin, D.reactionMax, 0, 3),
+  };
+}
+
+/** Параметры водителей по умолчанию для узла появления: из общих настроек */
+export function defaultSpawnDrivers(sim: ModelConfig['sim']): NonNullable<SpawnerParams['drivers']> {
+  const d = sim.drivers;
+  return {
+    accel: { min: d.accelMin, max: d.accelMax, dist: 'uniform' }, speed: { min: d.speedMin, max: d.speedMax, dist: 'uniform' },
+    headway: { min: d.headwayMin, max: d.headwayMax, dist: 'uniform' }, gap: { min: d.gap, max: d.gap, dist: 'uniform' },
+    reaction: { min: d.reactionMin, max: d.reactionMax, dist: 'uniform' },
   };
 }
 
@@ -226,7 +251,12 @@ function normalizeSim(raw: unknown): ModelConfig['sim'] {
     speedMin, speedMax: clampNum(dr.speedMax, D.speedMax, speedMin, 1.5),
     headwayMin, headwayMax: clampNum(dr.headwayMax, D.headwayMax, headwayMin, 4),
     gap: clampNum(dr.gap, D.gap, 0.5, 5), riskyFactor: clampNum(dr.riskyFactor, D.riskyFactor, 0.3, 1),
+    reactionMin: clampNum(dr.reactionMin, D.reactionMin, 0, 3), reactionMax: 0,
   };
+  sim.drivers.reactionMax = clampNum(dr.reactionMax, D.reactionMax, sim.drivers.reactionMin, 3);
+  sim.implicitShift = clampNum(r.implicitShift, SIM_DEFAULT.implicitShift, 0, 3);
+  sim.implicitBend = clampNum(r.implicitBend, SIM_DEFAULT.implicitBend, 0, 3);
+  sim.trajectoryChoice = r.trajectoryChoice === 'free' ? 'free' : 'random';
   const v = isObj(r.violations) ? r.violations : {};
   for (const k of Object.keys(sim.violations) as Array<keyof ModelConfig['sim']['violations']>) sim.violations[k] = clampNum(v[k], SIM_DEFAULT.violations[k], 0, 1);
   return sim;

@@ -196,8 +196,16 @@ function makeSvg() {
           <label>Интервал до впереди идущей, с, от <input v-model.number="sim.drivers.headwayMin" type="number" min="0.4" max="4" step="0.1" /></label>
           <label>до <input v-model.number="sim.drivers.headwayMax" type="number" min="0.4" max="4" step="0.1" /></label>
           <label>Рискованные: интервал и расстояние, множитель <input v-model.number="sim.drivers.riskyFactor" type="number" min="0.3" max="1" step="0.05" /></label>
+          <label>Время реакции, с, от <input v-model.number="sim.drivers.reactionMin" type="number" min="0" max="3" step="0.1" /></label>
+          <label>до <input v-model.number="sim.drivers.reactionMax" type="number" min="0" max="3" step="0.1" /></label>
+          <label>Выбор среди траекторий направления
+            <select v-model="sim.trajectoryChoice"><option value="random">случайно любую доступную</option><option value="free">ту, где впереди свободно и меньше очередь</option></select>
+          </label>
+          <label>Неявная траектория: сдвиг у стоп-линии до, м <input v-model.number="sim.implicitShift" type="number" min="0" max="3" step="0.1" /></label>
+          <label>изгиб в середине до, м <input v-model.number="sim.implicitBend" type="number" min="0" max="3" step="0.1" /></label>
         </div>
-        <label class="check"><input v-model="sim.pathSpread" type="checkbox" /> Разброс траекторий в перекрёстке: каждый водитель едет по своей кривой, на поворотах срезает к внутренней стороне</label>
+        <div class="small muted">Общие параметры водителей действуют на подходах, где в узле появления не заданы свои. Неявная траектория не выходит за запас полосы.</div>
+        <label class="check"><input v-model="sim.pathSpread" type="checkbox" /> Неявные траектории: водитель может ехать в стороне от основной траектории в заданных границах, на поворотах чаще срезает к внутренней стороне</label>
         <label>Время до освобождения проезда после столкновения, с <input v-model.number="sim.crashDuration" type="number" min="5" step="10" /></label>
         <label>Машина не успела перестроиться до сплошной
           <select v-model="sim.missedTurn"><option value="reroute">сразу едет по разрешённому из своей полосы направлению</option><option value="wait">сначала недолго ждёт окна перед сплошной</option></select>

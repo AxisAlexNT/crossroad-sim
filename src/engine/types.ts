@@ -162,6 +162,8 @@ export interface SpawnerParams {
   /** Доли машин по подходам выезда */
   destinations: Record<ArmId, number>;
   types: VehicleTypeParams[];
+  /** Свои параметры водителей этого подхода */
+  drivers?: SpawnDrivers;
 }
 
 export type LaneStrategy = 'weights' | 'shortestQueue';
@@ -271,6 +273,27 @@ export interface DriverSettings {
   gap: number;
   /** Рискованные водители держат интервал и расстояние меньше, множитель */
   riskyFactor: number;
+  /** Время реакции: через сколько секунд после того, как впереди тронулись, трогается сам, с */
+  reactionMin: number;
+  reactionMax: number;
+}
+
+export type Distribution = 'uniform' | 'normal' | 'triangular';
+
+/** Параметр водителя в узле появления: диапазон и распределение внутри него */
+export interface DriverParamRange {
+  min: number;
+  max: number;
+  dist: Distribution;
+}
+
+/** Водители, появляющиеся на этом подходе. Если не заданы, берутся общие настройки симуляции */
+export interface SpawnDrivers {
+  accel: DriverParamRange;
+  speed: DriverParamRange;
+  headway: DriverParamRange;
+  gap: DriverParamRange;
+  reaction: DriverParamRange;
 }
 
 export interface SimSettings {
@@ -311,6 +334,11 @@ export interface SimSettings {
    * трети запаса полосы, поэтому соседние ряды не задевают друг друга
    */
   pathSpread: boolean;
+  /** Границы неявной траектории: сдвиг у стоп-линии и изгиб в середине, м. Фактически не больше запаса полосы */
+  implicitShift: number;
+  implicitBend: number;
+  /** Как водитель выбирает среди траекторий направления: случайно любую или ту, где впереди свободно */
+  trajectoryChoice: 'random' | 'free';
   drivers: DriverSettings;
   /** Через сколько секунд взаимного ожидания фиксируется взаимная блокировка */
   deadlockSeconds: number;

@@ -82,6 +82,8 @@ export interface Conflict {
   bEnd: number;
   p: V2;
   kind: 'cross' | 'merge';
+  /** между траекториями из одной полосы: проезжают по очереди въезда */
+  same?: boolean;
 }
 
 export interface ConflictRef {
@@ -264,6 +266,32 @@ function autoRows(arms: Record<ArmId, ArmGeom>, c: Connection, kind: TurnKind): 
   return [{ shiftIn: kind === 'left' ? rIn : -rIn, bend: 0, row: true }];
 }
 
+/**
+ * Предел сдвига дополнительной траектории на узкой полосе: машина остаётся в своей полосе с запасом,
+ * чтобы соседние ряды не сходились. На полосе от TWO_ROW_WIDTH сдвиг не ограничивается
+ */
+export function variantLimit(laneWidth: number): number {
+  return laneWidth >= TWO_ROW_WIDTH ? Infinity : Math.max(0, (laneWidth - 1.8) / 2) * 0.6;
+}
+
+/** Наибольшее отклонение траектории от основной */
+export function variantPeak(v: ConnVariant): number {
+  let m = 0;
+  for (let k = 0; k <= 40; k++) {
+    const t = k / 40, sm = t * t * (3 - 2 * t);
+    m = Math.max(m, Math.abs(v.shiftIn * (1 - sm) + v.bend * Math.sin(Math.PI * t)));
+  }
+  return m;
+}
+
+/** Дополнительная траектория в пределах полосы: на узкой полосе форма сохраняется, а размах ужимается */
+export function fitVariant(v: ConnVariant, laneWidth: number): ConnVariant {
+  const lim = variantLimit(laneWidth), peak = variantPeak(v);
+  if (peak <= lim) return v;
+  const k = lim / peak;
+  return { shiftIn: v.shiftIn * k, bend: v.bend * k };
+}
+
 /** Траектория, сдвинутая вбок от основной: shiftIn на старте плавно уходит в ноль, bend — изгиб к середине */
 function offsetPath(base: Polyline, v: ConnVariant): Polyline {
   const L = base.length || 1;
@@ -305,6 +333,32 @@ function mergeStart(a: Polyline, b: Polyline, thr: number): number {
     if (distToPolyline(a.pts[i], b) > thr) return a.cum[Math.min(a.pts.length - 1, i + 1)];
   }
   return 0;
+}
+
+/** Координата вдоль ломаной ближайшей к точке */
+function projS(p: V2, pl: Polyline): number {
+  let best = Infinity, bs = 0;
+  for (let i = 0; i < pl.pts.length - 1; i++) {
+    const a = pl.pts[i], b = pl.pts[i + 1];
+    const ab = sub(b, a);
+    const l2 = ab.x * ab.x + ab.y * ab.y || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / l2));
+    const d = dist(p, { x: a.x + ab.x * t, y: a.y + ab.y * t });
+    if (d < best) { best = d; bs = pl.cum[i] + (pl.cum[i + 1] - pl.cum[i]) * t; }
+  }
+  return bs;
+}
+
+/** Участки ломаной a дальше from, где до b ближе thr: пары [начало, конец] */
+function nearRuns(a: Polyline, b: Polyline, thr: number, from: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let k0 = -1;
+  for (let k = 0; k < a.pts.length; k++) {
+    const near = a.cum[k] > from && distToPolyline(a.pts[k], b) < thr;
+    if (near && k0 < 0) k0 = k;
+    if ((!near || k === a.pts.length - 1) && k0 >= 0) { out.push([a.cum[k0], a.cum[near ? k : k - 1]]); k0 = -1; }
+  }
+  return out;
 }
 
 export function distToPolyline(p: V2, pl: Polyline): number {
@@ -413,7 +467,8 @@ export function buildNetwork(cfg: ModelConfig): Network {
   for (let i = 0; i < baseCount; i++) {
     const b = conns[i];
     const manual = b.conn.variants ?? [];
-    const list: Array<ConnVariant & { row: boolean }> = manual.length ? manual.map((v) => ({ ...v, row: false })) : autoRows(arms, b.conn, b.kind);
+    const lw = arms[b.conn.from.arm].cfg.laneWidth;
+    const list: Array<ConnVariant & { row: boolean }> = manual.length ? manual.map((v) => ({ ...fitVariant(v, lw), row: false })) : autoRows(arms, b.conn, b.kind);
     list.forEach((v, k) => {
       if (Math.abs(v.shiftIn) < 0.05 && Math.abs(v.bend) < 0.05) return;
       const idx = conns.length;
@@ -444,6 +499,10 @@ export function buildNetwork(cfg: ModelConfig): Network {
 
   const conflicts: Conflict[] = [];
   const W = 2.2;
+  /** траектории дальше этого друг от друга по оси — машины едут рядом, а не одна за другой */
+  const ROW_GAP = 2.25;
+  /** ближе этого рядом не помещаются машина и грузовик или автобус */
+  const ROW_NEAR = 2.5;
   for (let i = 0; i < conns.length; i++) {
     for (let j = i + 1; j < conns.length; j++) {
       const A = conns[i], B = conns[j];
@@ -453,15 +512,21 @@ export function buildNetwork(cfg: ModelConfig): Network {
       // траектории из одной полосы: основные одна за другой, а разные ряды и обходы — только если действительно пересекаются
       const alt = A.variant > 0 || B.variant > 0;
       if (sameFrom && !alt) continue;
-      if (sameFrom && A.conn.id === B.conn.id) continue;
       if (sameFrom) {
-        // из одного ряда едут друг за другом, конфликт возможен только между разными рядами
-        if (Math.abs(A.shiftIn - B.shiftIn) < 1) continue;
-        for (const x of polylineIntersections(A.path, B.path)) {
-          if (x.sa < 2 && x.sb < 2) continue;
-          const [a0, a1] = zoneAround(A.path, x.sa, B.path, W_ZONE);
-          const [b0, b1] = zoneAround(B.path, x.sb, A.path, W_ZONE);
-          conflicts.push({ id: conflicts.length, a: i, b: j, aStart: Math.max(0, a0 - 0.6), aEnd: Math.min(A.path.length, a1 + 0.6), bStart: Math.max(0, b0 - 0.6), bEnd: Math.min(B.path.length, b1 + 0.6), p: x.p, kind: 'cross' });
+        // из одной полосы едут по очереди въезда. Пока траектории идут рядом, работает следование за лидером,
+        // а там, где они расходятся и снова сходятся или пересекаются, — зона конфликта
+        // по основной траектории едут и грузовики с автобусами, им рядом нужно больше места
+        const thr = A.variant > 0 && B.variant > 0 ? ROW_GAP : ROW_NEAR;
+        const pre = (P: Polyline, Q: Polyline) => { for (let k = 0; k < P.pts.length; k++) if (distToPolyline(P.pts[k], Q) > thr) return P.cum[k]; return P.length; };
+        const pa = pre(A.path, B.path), pb = pre(B.path, A.path);
+        if (pa >= A.path.length - 0.5 && pb >= B.path.length - 0.5) continue;
+        // где траектории снова сближаются настолько, что машины не помещаются рядом, — зона по очереди въезда.
+        // Сближение до самого конца с общей полосой выезда — слияние
+        for (const [a0, a1] of nearRuns(A.path, B.path, thr, pa + 0.5)) {
+          const b0 = projS(pointAt(A.path, a0).p, B.path), b1 = projS(pointAt(A.path, a1).p, B.path);
+          if (b1 < pb + 0.5) continue;
+          const merge = sameTo && a1 >= A.path.length - 0.5;
+          conflicts.push({ id: conflicts.length, a: i, b: j, aStart: Math.max(0, a0 - 1.5), aEnd: merge ? A.path.length : Math.min(A.path.length, a1 + 1), bStart: Math.max(0, Math.min(b0, b1) - 1.5), bEnd: merge ? B.path.length : Math.min(B.path.length, Math.max(b0, b1) + 1), p: pointAt(A.path, (a0 + a1) / 2).p, kind: merge ? 'merge' : 'cross', same: true });
         }
         continue;
       }
@@ -505,7 +570,7 @@ export function buildNetwork(cfg: ModelConfig): Network {
       if (A === B || A.conn.from.arm !== B.conn.from.arm || A.conn.from.lane !== B.conn.from.lane) continue;
       let until = A.path.length;
       for (let i = 0; i < A.path.pts.length; i++) {
-        if (distToPolyline(A.path.pts[i], B.path) > W * 0.9) { until = A.path.cum[i]; break; }
+        if (distToPolyline(A.path.pts[i], B.path) > (A.variant > 0 && B.variant > 0 ? ROW_GAP : ROW_NEAR)) { until = A.path.cum[i]; break; }
       }
       A.siblings.push({ conn: B.idx, until: until + 2 });
     }

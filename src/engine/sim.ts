@@ -12,6 +12,7 @@ import type {
 import { armRelations, buildNetwork, pedRouteOptions, type ArmRelations, type ConflictRef, type Network, type PedRoute } from './network';
 import { obbOverlap, pointAt, dist, type OBB } from './geometry';
 import { pickWeighted, rngNext, rngSeedFrom, seedRng, streamSeed, type RngState } from './rng';
+import { TWO_ROW_WIDTH } from './network';
 import { advanceSegment, cycleLength, initSignal, lampOf, lampPermits, type Lamp, type SignalRuntime } from './signals';
 import { MAX_FAILS, SandboxNode } from './sandbox';
 import { nativeChooser, nativeExit, nativeSpawn } from './nodes';
@@ -21,8 +22,14 @@ export type Permit = 'main' | 'arrow' | 'none';
 export interface Vehicle {
   /** Собственный генератор случайных чисел машины */
   rng: RngState;
-  /** Склонность водителя отклоняться от оси манёвра, от −1 вправо до 1 влево */
+  /** Склонность водителя отклоняться от оси манёвра, от −1 вправо до 1 влево: сдвиг у стоп-линии и изгиб */
   lat: number;
+  lat2: number;
+  /** Время реакции водителя, с, и с какого момента он собирается тронуться */
+  reaction: number;
+  goSince: number;
+  /** с какого момента стоит, −1 если едет */
+  haltT: number;
   /** Текущий сдвиг поперёк полосы подхода, м: ряд на широкой полосе или обход по своей траектории */
   shiftNow: number;
   /** Кого эта машина пропускает в свою полосу из соседней, номер или -1, и до какого времени */
@@ -356,6 +363,19 @@ const LC_TIME = 3.0;
 /** Время реакции водителя на внезапно появившуюся из-за помехи машину, с */
 const REACTION = 0.8;
 const B_MAX = 7.0;
+
+/** Значение в диапазоне по распределению: равномерное, нормальное (±3σ в диапазоне) или треугольное. Всегда два случайных числа */
+function sampleRange(r: { min: number; max: number; dist: string }, st: RngState): number {
+  const u1 = rngNext(st), u2 = rngNext(st);
+  const lo = Math.min(r.min, r.max), hi = Math.max(r.min, r.max);
+  if (hi - lo < 1e-9) return lo;
+  if (r.dist === 'triangular') return lo + (hi - lo) * (u1 + u2) / 2;
+  if (r.dist === 'normal') {
+    const z = Math.sqrt(-2 * Math.log(1 - u1)) * Math.cos(2 * Math.PI * u2);
+    return Math.max(lo, Math.min(hi, (lo + hi) / 2 + z * (hi - lo) / 6));
+  }
+  return lo + (hi - lo) * u1;
+}
 const VEH_WIDTH: Record<VehicleKind, number> = { car: 1.8, van: 2.0, truck: 2.5, bus: 2.55 };
 const RECENT_WINDOW = 300;
 /** Интервал снимков состояния для перемотки, с */
@@ -863,17 +883,25 @@ export class Simulation {
       const truck = kind === 'truck' || kind === 'bus';
       const v0 = g.cfg.speedLimit / 3.6;
       const dr = this.cfg.sim.drivers;
+      // параметры водителя: из узла появления этого подхода или общие, каждый — по своему распределению
+      const sd = this.cfg.spawners[arm]?.params.drivers;
+      const pick = (r: { min: number; max: number; dist: string } | undefined, lo: number, hi: number) => sampleRange(r ?? { min: lo, max: hi, dist: 'uniform' }, vr);
+      const accel = pick(sd?.accel, dr.accelMin, dr.accelMax);
+      const headway = pick(sd?.headway, dr.headwayMin, dr.headwayMax);
+      const gap = pick(sd?.gap, dr.gap, dr.gap);
+      const speedF = pick(sd?.speed, dr.speedMin, dr.speedMax);
+      const reaction = pick(sd?.reaction, dr.reactionMin, dr.reactionMax);
       const lastInLane = (lists?.[lane] ?? [])[0];
       const veh: Vehicle = {
         id: st.nextVid++, kind, len: nv.length, wid: VEH_WIDTH[kind] ?? 1.8, origin: arm, dest: nv.destination,
         phase: 'approach', lane, targetLane: target, lcFrom: lane, lcT: -1, conn: -1, outLane: 0, s: 0, ps: 0,
         v: lastInLane && lastInLane.s < 60 ? Math.min(lastInLane.v, v0 * 0.9) : v0 * 0.9, a: 0,
-        amax: truck ? dr.heavyAccel : dr.accelMin + (dr.accelMax - dr.accelMin) * vrand(), bcomf: truck ? 2.0 : 2.5,
-        T: truck ? dr.headwayMax + 0.2 : dr.headwayMin + (dr.headwayMax - dr.headwayMin) * vrand(),
-        s0: dr.gap, v0f: dr.speedMin + (dr.speedMax - dr.speedMin) * vrand(), tWanted: item.t, tEnter: st.t, tStop: -1, stopTime: st.t - item.t,
+        amax: truck ? dr.heavyAccel : accel, bcomf: truck ? 2.0 : 2.5,
+        T: truck ? headway + 0.2 : headway,
+        s0: gap, v0f: speedF, reaction, goSince: -1, haltT: -1, tWanted: item.t, tEnter: st.t, tStop: -1, stopTime: st.t - item.t,
         risky: false, viol: { solid: false, stop: false, red: false, turn: false }, overStopDist: 0, overStop: false, solidCross: false, illegal: false,
         origDest: null, lcWaitSince: -1, error: null, wrongLane: wrong, committed: [],
-        rng: vr, lat: rngNext(vr) * 2 - 1, shiftNow: 0, lcYield: -1, lcYieldUntil: 0, lcHelper: -1, route: nv.route ?? null, stopsLeft: route ? route.stops.filter((id) => !!this.stopById(id)) : [], dwellUntil: -1, inBay: false, bayT: 0, bayShift: 0,
+        rng: vr, lat: rngNext(vr) * 2 - 1, lat2: rngNext(vr) * 2 - 1, shiftNow: 0, lcYield: -1, lcYieldUntil: 0, lcHelper: -1, route: nv.route ?? null, stopsLeft: route ? route.stops.filter((id) => !!this.stopById(id)) : [], dwellUntil: -1, inBay: false, bayT: 0, bayShift: 0,
         why: 'free', whyId: -1, stopSince: -1,
         yieldingAt: -1, yieldTo: -1, ghostUntil: 0, entryPermit: 'none', yellowDecision: 0, crashed: false, crashUntil: 0, stuckSince: -1,
         forcedLogged: false, gridlockLogged: false, danger: -1e9, x: 0, y: 0, h: 0, px: 0, py: 0, ph: 0,
@@ -1132,7 +1160,7 @@ export class Simulation {
       // автобус в кармане, рядом с которым мы уже едем, не помеха
       if (o.inBay && o.s - o.len < veh.s + 0.5) continue;
       // на широкой полосе у стоп-линии машины в разных рядах стоят рядом и друг другу не мешают
-      if (veh.phase === 'approach' && o.phase === 'approach' && Math.abs(o.shiftNow - veh.shiftNow) >= 1.9) continue;
+      if (veh.phase === 'approach' && o.phase === 'approach' && Math.abs(o.shiftNow - veh.shiftNow) >= (o.wid + veh.wid) / 2 + 0.45 && this.net.arms[veh.origin].cfg.laneWidth >= TWO_ROW_WIDTH) continue;
       // строгий порядок по положению, при равенстве — по номеру: две машины не могут быть лидерами друг друга
       if (o.s > veh.s || (o.s === veh.s && o.id < veh.id)) {
         if (!best || o.s < best.s) best = o;
@@ -1189,7 +1217,12 @@ export class Simulation {
     if (this.busNeedsCurbExit(veh.route, veh.stopsLeft, veh.dest)) {
       return list.reduce((b, ci) => (this.net.conns[ci].conn.to.lane > this.net.conns[b].conn.to.lane ? ci : b), list[0]);
     }
-    // водитель выбирает траекторию сам: ряд на широкой полосе, иначе ту, где впереди не стоит машина и меньше очередь
+    // водитель выбирает траекторию сам. По умолчанию — случайно любую из доступных, иначе ту, где впереди свободно
+    if (this.cfg.sim.trajectoryChoice === 'random' && list.length > 1) {
+      const rows = list.filter((ci) => this.net.conns[ci].row);
+      const pool = rows.length ? rows : list;
+      return pool[Math.min(pool.length - 1, Math.floor(rngNext(veh.rng) * pool.length))];
+    }
     let best = list[0], bestCost = Infinity;
     for (const ci of list) {
       const c = this.net.conns[ci];
@@ -1218,10 +1251,12 @@ export class Simulation {
   private shiftTarget(veh: Vehicle): number {
     if (veh.phase !== 'approach' || veh.conn < 0) return 0;
     const c = this.net.conns[veh.conn];
-    if (!c || !c.shiftIn) return 0;
+    if (!c) return 0;
+    const sh = c.shiftIn || this.implicit(veh, veh.conn).sh;
+    if (!sh) return 0;
     const L = this.net.arms[veh.origin].cfg.approachLength;
     const k = (veh.s - (L - ROW_ZONE)) / 10;
-    return c.shiftIn * Math.max(0, Math.min(1, k));
+    return sh * Math.max(0, Math.min(1, k));
   }
 
   private rerouteConn(veh: Vehicle): number {
@@ -1320,12 +1355,24 @@ export class Simulation {
     const sim = this.cfg.sim;
     this.blocker = -1;
     if (dStart < (veh.v * veh.v) / (2 * B_MAX) + 0.3) return false;
+    if (cf.same) {
+      // траектории из одной полосы: уступаем только тем, кто въехал раньше. Ехавшие сзади ждут нас
+      for (const o of this.connLists[B]) {
+        if (o === veh || o.crashed || o.s >= bEnd + o.len) continue;
+        if (veh.phase === 'conn' && o.tStop > veh.tStop) continue;
+        this.blocker = o.id;
+        return true;
+      }
+      return false;
+    }
     // давно стоит в перекрёстке: правила очерёдности уже не помогают, водитель выезжает,
     // но не въезжает в машину, которая физически в зоне конфликта или вот-вот в неё въедет
     const brk = this.cfg.sim.deadlockBreak;
     const stuck = brk > 0 && veh.phase === 'conn' && veh.stuckSince >= 0 && this.st.t - veh.stuckSince > brk;
-    const myClear = this.timeToCover(dEnd + veh.len, veh.v, Math.max(1.2, veh.amax), 9);
-    const myArrive = this.timeToCover(dStart, veh.v, Math.max(1.2, veh.amax), 9);
+    // стоящий водитель тронется только через своё время реакции
+    const lag = veh.v < 0.3 ? veh.reaction : 0;
+    const myClear = this.timeToCover(dEnd + veh.len, veh.v, Math.max(1.2, veh.amax), 9) + lag;
+    const myArrive = this.timeToCover(dStart, veh.v, Math.max(1.2, veh.amax), 9) + lag;
     const crit = this.isTurnLeft(A) ? sim.criticalGapLeft : sim.criticalGapOther;
     const obstr = this.obstructed(veh, A);
     const fromB = this.net.conns[B].conn.from;
@@ -1414,6 +1461,8 @@ export class Simulation {
    * а сразу за зоной придётся остановиться и уступить: иначе машина встанет у них на пути, ПДД 13.2
    */
   private wouldStopInside(veh: Vehicle, ci: number, cr: ConflictRef, offset: number): boolean {
+    // слияние траекторий из одной полосы — обычное следование, встать в нём поперёк чужого пути нельзя
+    if (this.net.conflicts[cr.conflict].same) return false;
     if (!this.connLists[cr.other].some((o) => o !== veh && !o.crashed)) return false;
     const brk = this.cfg.sim.deadlockBreak;
     if (brk > 0 && veh.phase === 'conn' && veh.stuckSince >= 0 && this.st.t - veh.stuckSince > brk) return false;
@@ -1439,6 +1488,7 @@ export class Simulation {
     const myClear = this.timeToCover(cr.end + veh.len - veh.s, veh.v, Math.max(1.2, veh.amax), 9);
     for (const o of this.connLists[cr.other]) {
       if (o === veh || o.crashed || o.s >= bEnd + o.len) continue;
+      if (cf.same && o.tStop > veh.tStop) continue;
       if (o.s > bStart) {
         if (o.v > 0.5 || this.firstHit(veh, veh.conn, veh.s + 0.3, cr.end + veh.len, o) < Infinity) return true;
         continue;
@@ -1884,6 +1934,13 @@ export class Simulation {
       if (bs && bs.s > veh.s - 0.5) take(bs.s - veh.s + veh.s0, 0, 'bus');
     }
     if (a === Infinity) a = this.idm(veh, v0, 1e6, v0);
+    // реакция: стоявший водитель трогается не сразу, а через своё время реакции
+    // только после настоящей остановки: короткая заминка в ползущей очереди реакции не требует
+    if (veh.v < 0.3) { if (veh.haltT < 0) veh.haltT = st.t; } else veh.haltT = -1;
+    if (veh.v < 0.3 && a > 0.2 && st.t - veh.haltT >= 1) {
+      if (veh.goSince < 0) veh.goSince = st.t;
+      if (st.t - veh.goSince < veh.reaction) return 0;
+    } else if (veh.v >= 0.3 || a <= 0) veh.goSince = -1;
     return Math.max(-B_MAX, Math.min(veh.amax, a));
   }
 
@@ -1934,13 +1991,31 @@ export class Simulation {
   private spread(veh: Vehicle, q: { p: { x: number; y: number }; h: number }, sc: number) {
     const c = this.net.conns[veh.conn];
     const L = c.path.length;
-    if (!(sc > 0 && sc < L) || c.kind === 'uturn') return;
-    const lw = this.net.arms[c.conn.from.arm].cfg.laneWidth;
-    const amp = Math.min(0.6, Math.max(0, (lw - veh.wid) / 2) * 0.35);
-    const inside = c.kind === 'left' ? 1 : c.kind === 'right' ? -1 : 0;
-    const u = Math.max(-1, Math.min(1, veh.lat * 0.65 + inside * 0.35));
-    const d = amp * u * Math.sin((Math.PI * sc) / L);
+    if (!(sc > 0 && sc < L)) return;
+    const { sh, bd } = this.implicit(veh, veh.conn);
+    if (!sh && !bd) return;
+    const t = sc / L, sm = t * t * (3 - 2 * t);
+    const d = sh * (1 - sm) + bd * Math.sin(Math.PI * t);
     q.p = { x: q.p.x - Math.sin(q.h) * d, y: q.p.y + Math.cos(q.h) * d };
+  }
+
+  /**
+   * Неявная траектория водителя: сдвиг у стоп-линии и изгиб в середине в границах из настроек, но не больше запаса полосы,
+   * чтобы соседние ряды не задевали друг друга. На поворотах чаще срезают к внутренней стороне. Только для основной траектории
+   */
+  private implicit(veh: Vehicle, ci: number): { sh: number; bd: number } {
+    const sim = this.cfg.sim;
+    const c = this.net.conns[ci];
+    if (!sim.pathSpread || !c || c.variant > 0 || c.kind === 'uturn' || veh.route) return { sh: 0, bd: 0 };
+    const lw = this.net.arms[c.conn.from.arm].cfg.laneWidth;
+    // сдвиг и изгиб вместе не больше запаса полосы, иначе соседние ряды на параллельных поворотах сходятся
+    const margin = Math.max(0, (lw - veh.wid) / 2) * 0.6;
+    const inside = c.kind === 'left' ? 1 : c.kind === 'right' ? -1 : 0;
+    const u2 = Math.max(-1, Math.min(1, veh.lat2 * 0.65 + inside * 0.35));
+    let sh = Math.max(0, sim.implicitShift) * veh.lat, bd = Math.max(0, sim.implicitBend) * u2;
+    const sum = Math.abs(sh) + Math.abs(bd);
+    if (sum > margin) { sh *= margin / sum; bd *= margin / sum; }
+    return { sh, bd };
   }
 
   /** Точка на пути машины в манёвре или на выезде: sc — координата вдоль текущего участка */
@@ -1952,7 +2027,8 @@ export class Simulation {
         const g = net.arms[c.conn.from.arm];
         const q = pointAt(g.inLanes[c.conn.from.lane], g.cfg.approachLength + sc);
         // задняя часть кузова ещё на подходе: в том же ряду, что и начало траектории
-        return c.shiftIn ? { p: { x: q.p.x - Math.sin(q.h) * c.shiftIn, y: q.p.y + Math.cos(q.h) * c.shiftIn }, h: q.h } : q;
+        const sh = c.shiftIn || this.implicit(veh, veh.conn).sh;
+        return sh ? { p: { x: q.p.x - Math.sin(q.h) * sh, y: q.p.y + Math.cos(q.h) * sh }, h: q.h } : q;
       }
       return pointAt(c.path, sc);
     }
@@ -2245,7 +2321,7 @@ export class Simulation {
         const last = st.confLast[cr.conflict];
         const mySide = cr.side;
         const other = mySide === 'a' ? 'b' : 'a';
-        if (veh.ps < cr.start && veh.s >= cr.start) {
+        if (veh.ps < cr.start && veh.s >= cr.start && !this.net.conflicts[cr.conflict].same) {
           let pet = st.t - last[other];
           const cf = this.net.conflicts[cr.conflict];
           const oStart = other === 'a' ? cf.aStart : cf.bStart;
