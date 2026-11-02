@@ -61,6 +61,12 @@ function toggleIn(gid: string, id: string, on: boolean) {
   if (on && !g.movements.includes(id)) g.movements.push(id);
   if (!on) g.movements = g.movements.filter((m) => m !== id);
 }
+function setBusOnly(on: boolean) {
+  const c = connSel.value;
+  if (!c) return;
+  if (on) c.busOnly = true;
+  else delete c.busOnly;
+}
 function addVariant() {
   const c = connSel.value;
   if (!c) return;
@@ -433,6 +439,8 @@ function setWeight(dest: ArmId, lane: number, v: number) {
           <input type="checkbox" :checked="g.movements.includes(connSel.id)" @change="toggleIn(g.id, connSel.id, ($event.target as HTMLInputElement).checked)" />
           <span class="chip" :style="{ background: g.color }" /> {{ g.name }} <span class="muted small">{{ g.kind === 'arrow' ? 'стрелка' : 'основной' }}</span>
         </label>
+        <label class="check"><input :checked="!!connSel.busOnly" type="checkbox" @change="setBusOnly(($event.target as HTMLInputElement).checked)" /> Только для рейсовых автобусов</label>
+        <div class="small muted">На схеме такое направление рисуется длинным пунктиром. Легковые и грузовые машины по нему не едут, автобусы маршрута выбирают его, если он ведёт в нужную сторону.</div>
         <h4>Траектории</h4>
         <div v-if="!connSel.variants?.length" class="small muted">Своих траекторий нет. На полосе шире 4,2 м с включёнными рядами траектория ряда строится сама.</div>
         <div v-for="(v, i) in connSel.variants ?? []" :key="i" class="row gap wrap">
@@ -441,7 +449,7 @@ function setWeight(dest: ArmId, lane: number, v: number) {
           <button class="btn small" title="Удалить траекторию" @click="removeVariant(i)">✕</button>
         </div>
         <button class="btn small" :disabled="(connSel.variants?.length ?? 0) >= 4" @click="addVariant">+ траектория</button>
-        <div class="small muted">Плюс — влево по ходу движения, минус — вправо. Водитель сам выбирает траекторию: ту, где впереди никто не стоит и меньше очередь. Конфликты между траекториями считаются по геометрии.</div>
+        <div class="small muted">Плюс — влево по ходу движения, минус — вправо. На схеме дополнительные траектории — короткий пунктир. Как водитель выбирает траекторию, задаётся в настройках. Конфликты между траекториями считаются по геометрии.</div>
         <button class="btn danger small" @click="deleteConn">Запретить это направление</button>
       </div>
       <div v-else class="muted">Направление удалено.</div>

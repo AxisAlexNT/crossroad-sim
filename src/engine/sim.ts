@@ -1214,6 +1214,11 @@ export class Simulation {
     const wide = veh.wid > 2.1 || !!veh.route;
     const usable = wide ? opts.filter((ci) => this.net.conns[ci].variant === 0) : opts;
     const list = usable.length ? usable : opts;
+    // рейсовый автобус едет по выделенному для автобусов направлению, если оно есть
+    if (veh.route) {
+      const own = list.filter((ci) => this.net.conns[ci].busOnly);
+      if (own.length && !this.busNeedsCurbExit(veh.route, veh.stopsLeft, veh.dest)) return own[0];
+    }
     if (this.busNeedsCurbExit(veh.route, veh.stopsLeft, veh.dest)) {
       return list.reduce((b, ci) => (this.net.conns[ci].conn.to.lane > this.net.conns[b].conn.to.lane ? ci : b), list[0]);
     }
