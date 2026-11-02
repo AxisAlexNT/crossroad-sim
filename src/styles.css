@@ -538,3 +538,4 @@ svg.map .cw-handle text { fill: var(--accent); }
 .map-help td:first-child { width: 28px; text-align: center; font-size: 15px; }
 .final-box { margin-bottom: 10px; }
 .btn.wrap-btn { white-space: normal; text-align: left; max-width: 100%; }
+svg.map .conns .alt .conn-line { stroke-dasharray: 0.6 0.6; }

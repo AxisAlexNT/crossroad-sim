@@ -38,7 +38,7 @@ export interface Polyline {
   length: number;
 }
 
-export function makePolyline(pts: V2[], lateralAccel = 2.2): Polyline {
+export function makePolyline(pts: V2[], lateralAccel = 3.0): Polyline {
   const cum: number[] = [0];
   for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
   const hdg: number[] = pts.map((_, i) => {

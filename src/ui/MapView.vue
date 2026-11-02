@@ -58,7 +58,7 @@ const groupColor = computed(() => {
 const connPaths = computed(() => {
   const n = net.value;
   if (!n) return [];
-  return n.conns.filter((c) => !c.illegal).map((c) => ({ id: c.conn.id, idx: c.idx, d: 'M' + c.path.pts.map(P).join('L'), color: groupColor.value.get(c.conn.id) ?? '#888', kind: c.kind, bus: c.busOnly }));
+  return n.conns.filter((c) => !c.illegal).map((c) => ({ id: c.conn.id, idx: c.idx, d: 'M' + c.path.pts.map(P).join('L'), color: groupColor.value.get(c.conn.id) ?? '#888', kind: c.kind, bus: c.busOnly, alt: c.variant > 0 }));
 });
 
 const pedGraph = computed(() => {
@@ -654,7 +654,7 @@ defineExpose({ svgEl, fit });
       <text v-for="l in armLabels" :key="'lbl' + l.d" class="arm-label" :x="l.x" :y="l.y" :text-anchor="l.anchor" :font-size="Math.max(1.6, scale * 11)">{{ l.text }}</text>
 
       <g class="conns" :class="{ edit: vehMode, shown: graphOn, live }">
-        <g v-for="c in connPaths" :key="c.id" :data-conn="c.id" :class="{ sel: c.id === selConn, bus: c.bus }">
+        <g v-for="c in connPaths" :key="c.idx" :data-conn="c.id" :class="{ sel: c.id === selConn, bus: c.bus, alt: c.alt }">
           <path :d="c.d" class="conn-hit" />
           <path :d="c.d" class="conn-line" :stroke="c.color" />
         </g>

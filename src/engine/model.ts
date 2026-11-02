@@ -15,7 +15,7 @@ const isObj = (x: unknown): x is Raw => !!x && typeof x === 'object' && !Array.i
 
 const V1_ANGLES: Record<string, number> = { E: 0, N: 90, W: 180, S: 270 };
 const V1_SHORT: Record<string, string> = { E: 'восток', N: 'север', W: 'запад', S: 'юг' };
-const V1_COLORS: Record<string, string> = { N: '#4f8cff', S: '#f2a33a', W: '#d4455f', E: '#22a387' };
+const V1_COLORS: Record<string, string> = { N: '#4f8cff', S: '#d4455f', W: '#e8b10e', E: '#22a387' };
 
 const ARM_DEFAULTS: Omit<ArmConfig, 'id' | 'name' | 'short' | 'angle' | 'color'> = {
   inLanes: 2, outLanes: 2, laneWidth: 3.5, medianWidth: 0, axisShift: 0, crosswalkOffset: 16, crosswalkWidth: 4,
@@ -60,6 +60,7 @@ function fixArm(a: Raw, i: number): ArmConfig {
     hasCrosswalk: merged.hasCrosswalk !== false,
     refuge: typeof a.refuge === 'boolean' ? a.refuge : id === 'W' && medianWidth >= 2,
     color: safeColor(a.color, V1_COLORS[id] ?? ARM_COLORS[i % ARM_COLORS.length]),
+    ...(a.twoRows === false ? { twoRows: false } : {}),
   };
 }
 
@@ -216,6 +217,16 @@ function normalizeSim(raw: unknown): ModelConfig['sim'] {
   sim.seed = Math.round(sim.seed);
   sim.crashPersist = typeof r.crashPersist === 'boolean' ? r.crashPersist : SIM_DEFAULT.crashPersist;
   sim.missedTurn = r.missedTurn === 'wait' ? 'wait' : 'reroute';
+  sim.pathSpread = typeof r.pathSpread === 'boolean' ? r.pathSpread : SIM_DEFAULT.pathSpread;
+  const dr = isObj(r.drivers) ? r.drivers : {};
+  const D = SIM_DEFAULT.drivers;
+  const accelMin = clampNum(dr.accelMin, D.accelMin, 0.5, 6), speedMin = clampNum(dr.speedMin, D.speedMin, 0.3, 1.5), headwayMin = clampNum(dr.headwayMin, D.headwayMin, 0.4, 4);
+  sim.drivers = {
+    accelMin, accelMax: clampNum(dr.accelMax, D.accelMax, accelMin, 6), heavyAccel: clampNum(dr.heavyAccel, D.heavyAccel, 0.3, 4),
+    speedMin, speedMax: clampNum(dr.speedMax, D.speedMax, speedMin, 1.5),
+    headwayMin, headwayMax: clampNum(dr.headwayMax, D.headwayMax, headwayMin, 4),
+    gap: clampNum(dr.gap, D.gap, 0.5, 5), riskyFactor: clampNum(dr.riskyFactor, D.riskyFactor, 0.3, 1),
+  };
   const v = isObj(r.violations) ? r.violations : {};
   for (const k of Object.keys(sim.violations) as Array<keyof ModelConfig['sim']['violations']>) sim.violations[k] = clampNum(v[k], SIM_DEFAULT.violations[k], 0, 1);
   return sim;
@@ -329,6 +340,8 @@ export function normalizeModel(input: unknown): ModelConfig {
   const connections = limitedArray(r.connections, LIMITS.connections, 'связи полос').filter(isObj).map((x, i) => {
     const c: ModelConfig['connections'][number] = { id: safeId(x.id, `C${i + 1}`), from: laneRef(x.from), to: laneRef(x.to) };
     if (x.busOnly === true) c.busOnly = true;
+    const vs = limitedArray(x.variants, 4, 'траектории направления').filter(isObj).map((v) => ({ shiftIn: clampNum(v.shiftIn, 0, -3, 3), bend: clampNum(v.bend, 0, -5, 5) }));
+    if (vs.length) c.variants = vs;
     return c;
   });
   const cfg: ModelConfig = {

@@ -25,12 +25,12 @@ export const KOLPINO_ARMS: ArmConfig[] = [
   {
     id: 'W', name: 'Оборонная улица, запад', short: 'запад', angle: 180, inLanes: 3, outLanes: 3, laneWidth: 3.75, medianWidth: 2.5,
     axisShift: 0, crosswalkOffset: 20, crosswalkWidth: 4, stopLineGap: 1.5,
-    approachLength: 160, solidLength: 40, exitLength: 120, speedLimit: 60, hasCrosswalk: true, refuge: true, color: '#d4455f',
+    approachLength: 160, solidLength: 40, exitLength: 120, speedLimit: 60, hasCrosswalk: true, refuge: true, color: '#e8b10e',
   },
   {
     id: 'S', name: 'Подъезд к Колпино, юг', short: 'юг', angle: 270, inLanes: 1, outLanes: 1, laneWidth: 4.5, medianWidth: 0,
     axisShift: 0, crosswalkOffset: 23.5, crosswalkWidth: 4, stopLineGap: 1.5,
-    approachLength: 150, solidLength: 25, exitLength: 150, speedLimit: 60, hasCrosswalk: true, refuge: false, color: '#f2a33a',
+    approachLength: 150, solidLength: 25, exitLength: 150, speedLimit: 60, hasCrosswalk: true, refuge: false, color: '#d4455f',
   },
 ];
 
@@ -84,14 +84,14 @@ function program(gs: SignalGroup[], phases: Phase[]): SignalProgram {
 
 // Транспортные группы «как есть»: по одному основному светофору на подход (левый поворот без защиты)
 const G_N: SignalGroup = { id: 'N', name: 'Тверская с севера', kind: 'vehicle', arm: 'N', movements: ['N0-S0', 'N0-W2', 'N0-E0'], color: '#4f8cff' };
-const G_S: SignalGroup = { id: 'S', name: 'Подъезд с юга', kind: 'vehicle', arm: 'S', movements: ['S0-N0', 'S0-W0', 'S0-E1'], color: '#f2a33a' };
-const G_W_ALL: SignalGroup = { id: 'W', name: 'Оборонная с запада', kind: 'vehicle', arm: 'W', movements: ['W0-N0', 'W0-E0', 'W1-E1', 'W2-S0'], color: '#d4455f' };
+const G_S: SignalGroup = { id: 'S', name: 'Подъезд с юга', kind: 'vehicle', arm: 'S', movements: ['S0-N0', 'S0-W0', 'S0-E1'], color: '#d4455f' };
+const G_W_ALL: SignalGroup = { id: 'W', name: 'Оборонная с запада', kind: 'vehicle', arm: 'W', movements: ['W0-N0', 'W0-E0', 'W1-E1', 'W2-S0'], color: '#e8b10e' };
 const G_E_ALL: SignalGroup = { id: 'E', name: 'Оборонная с востока', kind: 'vehicle', arm: 'E', movements: ['E0-S0', 'E0-W0', 'E1-W1', 'E2-N0'], color: '#22a387' };
-const G_WR: SignalGroup = { id: 'Wr', name: 'Допсекция направо с запада', kind: 'arrow', arm: 'W', movements: ['W2-S0'], color: '#b23a51', parent: 'W', side: 'right' };
+const G_WR: SignalGroup = { id: 'Wr', name: 'Допсекция направо с запада', kind: 'arrow', arm: 'W', movements: ['W2-S0'], color: '#b8890b', parent: 'W', side: 'right' };
 // Группы с отдельными стрелками налево
-const G_W_SR: SignalGroup = { id: 'W', name: 'Оборонная с запада, прямо и направо', kind: 'vehicle', arm: 'W', movements: ['W0-E0', 'W1-E1', 'W2-S0'], color: '#d4455f' };
+const G_W_SR: SignalGroup = { id: 'W', name: 'Оборонная с запада, прямо и направо', kind: 'vehicle', arm: 'W', movements: ['W0-E0', 'W1-E1', 'W2-S0'], color: '#e8b10e' };
 const G_E_SR: SignalGroup = { id: 'E', name: 'Оборонная с востока, прямо и направо', kind: 'vehicle', arm: 'E', movements: ['E0-W0', 'E1-W1', 'E2-N0'], color: '#22a387' };
-const G_WL: SignalGroup = { id: 'Wl', name: 'Допсекция налево с запада', kind: 'arrow', arm: 'W', movements: ['W0-N0'], color: '#ff6b8b', parent: 'W', side: 'left' };
+const G_WL: SignalGroup = { id: 'Wl', name: 'Допсекция налево с запада', kind: 'arrow', arm: 'W', movements: ['W0-N0'], color: '#ffd34d', parent: 'W', side: 'left' };
 const G_EL: SignalGroup = { id: 'El', name: 'Допсекция налево с востока', kind: 'arrow', arm: 'E', movements: ['E0-S0'], color: '#5fd4b5', parent: 'E', side: 'left' };
 // Пешеходные светофоры: по группе на каждый переход (через западную часть Оборонной — обе половины с островком)
 const P_N: SignalGroup = { id: 'PN', name: 'Пешеходы через Тверскую', kind: 'pedestrian', arm: 'N', movements: ['NE~NW'], color: PED_COLOR };
@@ -207,7 +207,6 @@ export const KOLPINO_TRANSIT = (): TransitConfig => ({
     { id: 'TV-in', name: 'Тверская улица перед перекрёстком', arm: 'N', side: 'approach', dist: 18, bay: true },
     { id: 'TV-out', name: 'Тверская улица за перекрёстком', arm: 'N', side: 'exit', dist: 65, bay: true },
     { id: 'OB-W', name: 'Оборонная улица к западу от перекрёстка', arm: 'W', side: 'exit', dist: 20, bay: true },
-    { id: 'OB-E', name: 'Оборонная улица к востоку от перекрёстка', arm: 'E', side: 'exit', dist: 25, bay: true },
   ],
   routes: [
     { id: '324n', name: '324 к Тверской', from: 'S', to: 'N', stops: ['TV-out'], perHour: 3.3, length: 12, headway: '14–22 мин', enabled: true },

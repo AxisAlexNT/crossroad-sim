@@ -141,7 +141,7 @@ function runChecksRaw(cfg: ModelConfig): CheckResult[] {
 
   // --- Связь направлений и светофоров ---
   net.conns.forEach((c, ci) => {
-    if (c.illegal) return;
+    if (c.illegal || c.variant > 0) return;
     const groups = p.groups.filter((g) => g.kind !== 'pedestrian' && g.movements.includes(c.conn.id));
     if (groups.length === 0) add({ level: 'error', code: 'unsignalled', msg: `Направление «${lbl(ci)}» не управляется ни одной сигнальной группой, по нему никогда не будет зелёного.` });
     const mains = groups.filter((g) => g.kind === 'vehicle');
@@ -163,6 +163,8 @@ function runChecksRaw(cfg: ModelConfig): CheckResult[] {
     const seen = new Set<string>();
     for (const cf of net.conflicts) {
       const a = net.conns[cf.a], b = net.conns[cf.b];
+      // дополнительные траектории повторяют основные: проверяем по основным
+      if (a.variant > 0 || b.variant > 0) continue;
       if (pm[cf.a] === 'none' || pm[cf.b] === 'none') continue;
       const key = `${cf.a}-${cf.b}`;
       if (seen.has(key)) continue;
@@ -209,7 +211,7 @@ function runChecksRaw(cfg: ModelConfig): CheckResult[] {
     const pedEdgeSeen = new Set<string>();
     for (const ei of pedOpen) {
       const e = net.pedEdges[ei];
-      const crossing = net.conns.filter((c, ci) => pm[ci] !== 'none' && c.crossings.some((x) => x.edge === ei));
+      const crossing = net.conns.filter((c, ci) => c.variant === 0 && pm[ci] !== 'none' && c.crossings.some((x) => x.edge === ei));
       if (!crossing.length) continue;
       const name = pedEdgeLabel(cfg, net, ei);
       if (e.kind === 'free') {
@@ -325,6 +327,7 @@ function runChecksRaw(cfg: ModelConfig): CheckResult[] {
     const adj = new Map<number, Set<number>>();
     for (const cf of net.conflicts) {
       if (cf.kind !== 'cross' || pm[cf.a] === 'none' || pm[cf.b] === 'none') continue;
+      if (net.conns[cf.a].variant > 0 || net.conns[cf.b].variant > 0) continue;
       const y = staticYield(cf.a, cf.b, pm);
       if (y === null) continue;
       const [from, to] = y ? [cf.a, cf.b] : [cf.b, cf.a];

@@ -60,6 +60,23 @@ function toggleIn(gid: string, id: string, on: boolean) {
   if (on && !g.movements.includes(id)) g.movements.push(id);
   if (!on) g.movements = g.movements.filter((m) => m !== id);
 }
+function addVariant() {
+  const c = connSel.value;
+  if (!c) return;
+  (c.variants ??= []).push({ shiftIn: -1, bend: 0 });
+}
+function removeVariant(i: number) {
+  const c = connSel.value;
+  if (!c?.variants) return;
+  c.variants.splice(i, 1);
+  if (!c.variants.length) delete c.variants;
+}
+function setTwoRows(on: boolean) {
+  const a = armCfg.value;
+  if (!a) return;
+  if (on) delete a.twoRows;
+  else a.twoRows = false;
+}
 function deleteConn() {
   const c = connSel.value;
   if (!c) return;
@@ -373,6 +390,7 @@ function setWeight(dest: ArmId, lane: number, v: number) {
           <label>Цвет машин <input v-model="armCfg.color" type="color" /></label>
           <label class="check"><input v-model="armCfg.hasCrosswalk" type="checkbox" /> Пешеходный переход</label>
           <label class="check"><input v-model="armCfg.refuge" type="checkbox" /> Островок безопасности на разделителе</label>
+          <label class="check"><input :checked="armCfg.twoRows !== false" type="checkbox" @change="setTwoRows(($event.target as HTMLInputElement).checked)" /> Широкая полоса, от 4,2 м, у перекрёстка работает как два ряда</label>
         </div>
         <div class="small muted">Новые островки и переходы появятся в пешеходном графе после команды «Достроить пешеходный граф» на вкладке «Редактор», панель «Схема».</div>
       </details>
@@ -388,6 +406,15 @@ function setWeight(dest: ArmId, lane: number, v: number) {
           <input type="checkbox" :checked="g.movements.includes(connSel.id)" @change="toggleIn(g.id, connSel.id, ($event.target as HTMLInputElement).checked)" />
           <span class="chip" :style="{ background: g.color }" /> {{ g.name }} <span class="muted small">{{ g.kind === 'arrow' ? 'стрелка' : 'основной' }}</span>
         </label>
+        <h4>Траектории</h4>
+        <div v-if="!connSel.variants?.length" class="small muted">Своих траекторий нет. На полосе шире 4,2 м с включёнными рядами траектория ряда строится сама.</div>
+        <div v-for="(v, i) in connSel.variants ?? []" :key="i" class="row gap wrap">
+          <label>Сдвиг у стоп-линии, м <input v-model.number="v.shiftIn" type="number" step="0.1" min="-3" max="3" style="width: 70px" /></label>
+          <label>Изгиб в середине, м <input v-model.number="v.bend" type="number" step="0.1" min="-5" max="5" style="width: 70px" /></label>
+          <button class="btn small" title="Удалить траекторию" @click="removeVariant(i)">✕</button>
+        </div>
+        <button class="btn small" :disabled="(connSel.variants?.length ?? 0) >= 4" @click="addVariant">+ траектория</button>
+        <div class="small muted">Плюс — влево по ходу движения, минус — вправо. Водитель сам выбирает траекторию: ту, где впереди никто не стоит и меньше очередь. Конфликты между траекториями считаются по геометрии.</div>
         <button class="btn danger small" @click="deleteConn">Запретить это направление</button>
       </div>
       <div v-else class="muted">Направление удалено.</div>

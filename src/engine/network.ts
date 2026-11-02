@@ -1,7 +1,7 @@
 // Геометрия перекрёстка из модели: подходы под любыми углами, полосы, траектории манёвров,
 // точки конфликтов, пешеходный граф (углы, островки, переходы) и его пересечения с траекториями машин.
 
-import type { ArmConfig, ArmId, Connection, ModelConfig, PedNode, TurnKind } from './types';
+import type { ArmConfig, ArmId, Connection, ConnVariant, ModelConfig, PedNode, TurnKind } from './types';
 import {
   add, cubic, dist, makePolyline, mul, pointAt, polylineIntersections, right, sub, v,
   type Polyline, type V2,
@@ -64,6 +64,12 @@ export interface ConnGeom {
   conflicts: ConflictRef[];
   crossings: Crossing[];
   siblings: { conn: number; until: number }[];
+  /** 0 — основная траектория направления, 1, 2… — дополнительные */
+  variant: number;
+  /** сдвиг траектории на стоп-линии, м, плюс — влево по ходу */
+  shiftIn: number;
+  /** траектория ряда на широкой полосе: её выбирают в первую очередь */
+  row: boolean;
 }
 
 export interface Conflict {
@@ -115,6 +121,8 @@ export interface Network {
   conns: ConnGeom[];
   legalCount: number;
   connById: Map<string, number>;
+  /** все траектории направления: основная и дополнительные */
+  connsById: Map<string, number[]>;
   conflicts: Conflict[];
   /** для каждой полосы: подход выезда → манёвры (вместе с направлениями только для автобусов) */
   connFor: Record<ArmId, Array<Record<ArmId, number[]>>>;
@@ -233,6 +241,39 @@ function connectionPath(arms: Record<ArmId, ArmGeom>, c: Connection, kind: TurnK
   const n = kind === 'straight' ? 12 : 36;
   const pts: V2[] = [];
   for (let i = 0; i <= n; i++) pts.push(cubic(A, P1, P2, B, i / n));
+  return makePolyline(pts);
+}
+
+/** Полоса считается широкой и может работать как два ряда */
+export const TWO_ROW_WIDTH = 4.2;
+/** Насколько ряд смещён от оси полосы, м */
+export const rowShift = (laneWidth: number) => Math.min(1.4, Math.max(0, (laneWidth - 2.1) / 2));
+
+/**
+ * Ряды на широкой полосе: на подходе налево встают слева, прямо и направо — справа,
+ * на широком выезде поворачивающие идут ближе к своей стороне и сливаются у перехода
+ */
+function autoRows(arms: Record<ArmId, ArmGeom>, c: Connection, kind: TurnKind): Array<ConnVariant & { row: boolean }> {
+  const a = arms[c.from.arm].cfg, b = arms[c.to.arm].cfg;
+  const inWide = a.twoRows !== false && a.laneWidth >= TWO_ROW_WIDTH;
+  if (kind === 'uturn') return [];
+  void b;
+  // на широком выезде отдельная траектория не нужна: потоки идут рядом, пока между ними есть место, и сливаются у перехода
+  if (!inWide) return [];
+  const rIn = rowShift(a.laneWidth);
+  return [{ shiftIn: kind === 'left' ? rIn : -rIn, bend: 0, row: true }];
+}
+
+/** Траектория, сдвинутая вбок от основной: shiftIn на старте плавно уходит в ноль, bend — изгиб к середине */
+function offsetPath(base: Polyline, v: ConnVariant): Polyline {
+  const L = base.length || 1;
+  const pts = base.pts.map((p, i) => {
+    const t = base.cum[i] / L;
+    const sm = t * t * (3 - 2 * t);
+    const d = v.shiftIn * (1 - sm) + v.bend * Math.sin(Math.PI * t);
+    const h = base.hdg[i];
+    return { x: p.x - Math.sin(h) * d, y: p.y + Math.cos(h) * d };
+  });
   return makePolyline(pts);
 }
 
@@ -364,9 +405,23 @@ export function buildNetwork(cfg: ModelConfig): Network {
     if (c.from.lane >= ga.cfg.inLanes || c.to.lane >= gb.cfg.outLanes) continue;
     const kind = turnKindByAngle(ga.cfg, gb.cfg);
     const idx = conns.length;
-    conns.push({ idx, conn: c, kind, illegal: false, busOnly: !!c.busOnly, path: connectionPath(arms, c, kind), conflicts: [], crossings: [], siblings: [] });
+    conns.push({ idx, conn: c, kind, illegal: false, busOnly: !!c.busOnly, path: connectionPath(arms, c, kind), conflicts: [], crossings: [], siblings: [], variant: 0, shiftIn: 0, row: false });
     connById.set(c.id, idx);
   }
+  // дополнительные траектории: заданные в модели или ряды на широкой полосе
+  const baseCount = conns.length;
+  for (let i = 0; i < baseCount; i++) {
+    const b = conns[i];
+    const manual = b.conn.variants ?? [];
+    const list: Array<ConnVariant & { row: boolean }> = manual.length ? manual.map((v) => ({ ...v, row: false })) : autoRows(arms, b.conn, b.kind);
+    list.forEach((v, k) => {
+      if (Math.abs(v.shiftIn) < 0.05 && Math.abs(v.bend) < 0.05) return;
+      const idx = conns.length;
+      conns.push({ ...b, idx, path: offsetPath(b.path, v), conflicts: [], crossings: [], siblings: [], variant: k + 1, shiftIn: v.shiftIn, row: v.row });
+    });
+  }
+  const connsById = new Map<string, number[]>();
+  for (const c of conns) { const l = connsById.get(c.conn.id) ?? []; l.push(c.idx); connsById.set(c.conn.id, l); }
   const legalCount = conns.length;
   // запрещённые разметкой манёвры: из полосы туда, куда из неё ехать нельзя (для нарушителей)
   for (const a of cfg.arms) {
@@ -381,7 +436,7 @@ export function buildNetwork(cfg: ModelConfig): Network {
         const toLane = kind === 'left' ? 0 : kind === 'right' ? b.outLanes - 1 : Math.min(lane, b.outLanes - 1);
         const c: Connection = { id: `X:${a.id}${lane}-${b.id}${toLane}`, from: { arm: a.id, lane }, to: { arm: b.id, lane: toLane } };
         const idx = conns.length;
-        conns.push({ idx, conn: c, kind, illegal: true, busOnly: false, path: connectionPath(arms, c, kind), conflicts: [], crossings: [], siblings: [] });
+        conns.push({ idx, conn: c, kind, illegal: true, busOnly: false, path: connectionPath(arms, c, kind), conflicts: [], crossings: [], siblings: [], variant: 0, shiftIn: 0, row: false });
         connById.set(c.id, idx);
       }
     }
@@ -395,10 +450,28 @@ export function buildNetwork(cfg: ModelConfig): Network {
       if (A.illegal && B.illegal) continue;
       const sameFrom = A.conn.from.arm === B.conn.from.arm && A.conn.from.lane === B.conn.from.lane;
       const sameTo = A.conn.to.arm === B.conn.to.arm && A.conn.to.lane === B.conn.to.lane;
-      if (sameFrom) continue;
+      // траектории из одной полосы: основные одна за другой, а разные ряды и обходы — только если действительно пересекаются
+      const alt = A.variant > 0 || B.variant > 0;
+      if (sameFrom && !alt) continue;
+      if (sameFrom && A.conn.id === B.conn.id) continue;
+      if (sameFrom) {
+        // из одного ряда едут друг за другом, конфликт возможен только между разными рядами
+        if (Math.abs(A.shiftIn - B.shiftIn) < 1) continue;
+        for (const x of polylineIntersections(A.path, B.path)) {
+          if (x.sa < 2 && x.sb < 2) continue;
+          const [a0, a1] = zoneAround(A.path, x.sa, B.path, W_ZONE);
+          const [b0, b1] = zoneAround(B.path, x.sb, A.path, W_ZONE);
+          conflicts.push({ id: conflicts.length, a: i, b: j, aStart: Math.max(0, a0 - 0.6), aEnd: Math.min(A.path.length, a1 + 0.6), bStart: Math.max(0, b0 - 0.6), bEnd: Math.min(B.path.length, b1 + 0.6), p: x.p, kind: 'cross' });
+        }
+        continue;
+      }
+      if (sameTo && A.conn.id === B.conn.id) continue;
       if (sameTo) {
-        const aStart = mergeStart(A.path, B.path, W * 1.25);
-        const bStart = mergeStart(B.path, A.path, W * 1.25);
+        // на широком выезде два потока идут рядом и сливаются, только когда между ними не остаётся места
+        const toCfg = arms[A.conn.to.arm].cfg;
+        const thr = toCfg.twoRows !== false && toCfg.laneWidth >= TWO_ROW_WIDTH ? 2.1 : W * 1.25;
+        const aStart = mergeStart(A.path, B.path, thr);
+        const bStart = mergeStart(B.path, A.path, thr);
         conflicts.push({ id: conflicts.length, a: i, b: j, aStart: Math.max(0, aStart - 1), aEnd: A.path.length, bStart: Math.max(0, bStart - 1), bEnd: B.path.length, p: A.path.pts[A.path.pts.length - 1], kind: 'merge' });
         continue;
       }
@@ -547,7 +620,7 @@ export function buildNetwork(cfg: ModelConfig): Network {
     minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
     minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
   }
-  return { arms, order, conns, legalCount, connById, conflicts, connFor, illegalFor, reachable, reachableBus, connsFromLane, connsToLane, pedNodes, pedNodeById, pedEdges, pedEdgeById, outline, bounds: { minX, maxX, minY, maxY } };
+  return { arms, order, conns, legalCount, connById, connsById, conflicts, connFor, illegalFor, reachable, reachableBus, connsFromLane, connsToLane, pedNodes, pedNodeById, pedEdges, pedEdgeById, outline, bounds: { minX, maxX, minY, maxY } };
 }
 
 function pointOn(pl: Polyline, s: number): V2 {

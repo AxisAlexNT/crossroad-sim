@@ -166,6 +166,10 @@
         },
         "color": {
           "type": "string"
+        },
+        "twoRows": {
+          "type": "boolean",
+          "description": "Широкая полоса от 4,2 м у перекрёстка работает как два ряда, по умолчанию true"
         }
       }
     },
@@ -205,6 +209,32 @@
         "busOnly": {
           "type": "boolean",
           "description": "Направление разрешено только рейсовым автобусам"
+        },
+        "variants": {
+          "type": "array",
+          "maxItems": 4,
+          "description": "Дополнительные траектории направления",
+          "items": {
+            "type": "object",
+            "properties": {
+              "shiftIn": {
+                "type": "number",
+                "minimum": -3,
+                "maximum": 3,
+                "description": "Сдвиг на стоп-линии, м, плюс — влево по ходу"
+              },
+              "bend": {
+                "type": "number",
+                "minimum": -5,
+                "maximum": 5,
+                "description": "Изгиб в середине, м, плюс — влево по ходу"
+              }
+            },
+            "required": [
+              "shiftIn",
+              "bend"
+            ]
+          }
         }
       }
     },
@@ -544,6 +574,10 @@
         "ttcDanger": {
           "type": "number"
         },
+        "pathSpread": {
+          "type": "boolean",
+          "description": "Разброс траекторий в перекрёстке: каждый водитель проходит манёвр по своей кривой"
+        },
         "crashPersist": {
           "type": "boolean"
         },
@@ -614,6 +648,13 @@
         "noProgressSeconds": {
           "type": "number",
           "minimum": 0
+        },
+        "drivers": {
+          "type": "object",
+          "description": "Водители: ускорение accelMin–accelMax и heavyAccel, м/с², желаемая скорость speedMin–speedMax в долях разрешённой, интервал headwayMin–headwayMax, с, расстояние gap, м, множитель riskyFactor для рискованных",
+          "additionalProperties": {
+            "type": "number"
+          }
         }
       }
     },

@@ -186,6 +186,18 @@ function makeSvg() {
         <label>Окно «пересечений траекторий», с <input v-model.number="sim.petWindow" type="number" min="1" max="20" step="0.5" /></label>
         <label>Порог сближения по габаритам, с <input v-model.number="sim.ttcDanger" type="number" min="0" max="3" step="0.1" /></label>
         <label class="check"><input v-model="sim.crashPersist" type="checkbox" /> Столкнувшиеся машины остаются на месте и перекрывают проезд</label>
+        <div class="grid3">
+          <label>Ускорение легковых, м/с², от <input v-model.number="sim.drivers.accelMin" type="number" min="0.5" max="6" step="0.1" /></label>
+          <label>до <input v-model.number="sim.drivers.accelMax" type="number" min="0.5" max="6" step="0.1" /></label>
+          <label>Ускорение грузовых и автобусов, м/с² <input v-model.number="sim.drivers.heavyAccel" type="number" min="0.3" max="4" step="0.05" /></label>
+          <label>Желаемая скорость, доля от разрешённой, от <input v-model.number="sim.drivers.speedMin" type="number" min="0.3" max="1.5" step="0.05" /></label>
+          <label>до <input v-model.number="sim.drivers.speedMax" type="number" min="0.3" max="1.5" step="0.05" /></label>
+          <label>Расстояние до стоящей впереди, м <input v-model.number="sim.drivers.gap" type="number" min="0.5" max="5" step="0.1" /></label>
+          <label>Интервал до впереди идущей, с, от <input v-model.number="sim.drivers.headwayMin" type="number" min="0.4" max="4" step="0.1" /></label>
+          <label>до <input v-model.number="sim.drivers.headwayMax" type="number" min="0.4" max="4" step="0.1" /></label>
+          <label>Рискованные: интервал и расстояние, множитель <input v-model.number="sim.drivers.riskyFactor" type="number" min="0.3" max="1" step="0.05" /></label>
+        </div>
+        <label class="check"><input v-model="sim.pathSpread" type="checkbox" /> Разброс траекторий в перекрёстке: каждый водитель едет по своей кривой, на поворотах срезает к внутренней стороне</label>
         <label>Время до освобождения проезда после столкновения, с <input v-model.number="sim.crashDuration" type="number" min="5" step="10" /></label>
         <label>Машина не успела перестроиться до сплошной
           <select v-model="sim.missedTurn"><option value="reroute">сразу едет по разрешённому из своей полосы направлению</option><option value="wait">сначала недолго ждёт окна перед сплошной</option></select>
