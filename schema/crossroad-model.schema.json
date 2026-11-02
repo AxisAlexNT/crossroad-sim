@@ -1,0 +1,804 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "crossroad-model.schema.json",
+  "title": "Модель регулируемого перекрёстка crossroad-model, версия 2",
+  "description": "Метры, секунды, начало координат — центр перекрёстка, x — на восток, y — на север. Подробности в docs/model-format.md.",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "name",
+    "arms",
+    "connections",
+    "peds",
+    "signals",
+    "sim"
+  ],
+  "properties": {
+    "format": {
+      "const": "crossroad-model"
+    },
+    "version": {
+      "const": 2
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "arms": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/$defs/arm"
+      }
+    },
+    "connections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/connection"
+      }
+    },
+    "peds": {
+      "$ref": "#/$defs/peds"
+    },
+    "signals": {
+      "$ref": "#/$defs/signals"
+    },
+    "spawners": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/codeNode"
+      }
+    },
+    "laneChoosers": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/codeNode"
+      }
+    },
+    "exits": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/codeNode"
+      }
+    },
+    "sim": {
+      "$ref": "#/$defs/sim"
+    },
+    "transit": {
+      "$ref": "#/$defs/transit"
+    },
+    "basemap": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/basemap"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "arm": {
+      "type": "object",
+      "required": [
+        "id",
+        "angle",
+        "inLanes",
+        "outLanes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "description": "Короткий идентификатор подхода"
+        },
+        "name": {
+          "type": "string"
+        },
+        "short": {
+          "type": "string",
+          "description": "Короткое название стороны для подписей"
+        },
+        "angle": {
+          "type": "number",
+          "description": "Направление дороги от центра наружу, градусы: 0 — восток, 90 — север"
+        },
+        "inLanes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "outLanes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "laneWidth": {
+          "type": "number",
+          "minimum": 2,
+          "maximum": 7
+        },
+        "medianWidth": {
+          "type": "number",
+          "minimum": 0
+        },
+        "axisShift": {
+          "type": "number"
+        },
+        "crosswalkOffset": {
+          "type": "number",
+          "minimum": 0
+        },
+        "crosswalkWidth": {
+          "type": "number",
+          "minimum": 1
+        },
+        "stopLineGap": {
+          "type": "number",
+          "minimum": 0
+        },
+        "approachLength": {
+          "type": "number",
+          "minimum": 10
+        },
+        "solidLength": {
+          "type": "number",
+          "minimum": 0
+        },
+        "exitLength": {
+          "type": "number",
+          "minimum": 10
+        },
+        "speedLimit": {
+          "type": "number",
+          "minimum": 5
+        },
+        "hasCrosswalk": {
+          "type": "boolean"
+        },
+        "refuge": {
+          "type": "boolean",
+          "description": "На разделителе есть островок безопасности"
+        },
+        "color": {
+          "type": "string"
+        }
+      }
+    },
+    "laneRef": {
+      "type": "object",
+      "required": [
+        "arm",
+        "lane"
+      ],
+      "properties": {
+        "arm": {
+          "type": "string"
+        },
+        "lane": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "connection": {
+      "type": "object",
+      "required": [
+        "id",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/laneRef"
+        },
+        "to": {
+          "$ref": "#/$defs/laneRef"
+        },
+        "busOnly": {
+          "type": "boolean",
+          "description": "Направление разрешено только рейсовым автобусам"
+        }
+      }
+    },
+    "pedNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "corner",
+            "island",
+            "point"
+          ]
+        },
+        "arms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "corner — два соседних подхода, island — один подход"
+        },
+        "label": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "dx": {
+          "type": "number"
+        },
+        "dy": {
+          "type": "number"
+        }
+      }
+    },
+    "pedEdge": {
+      "type": "object",
+      "required": [
+        "id",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1
+        }
+      }
+    },
+    "pedSource": {
+      "type": "object",
+      "required": [
+        "node",
+        "rate",
+        "destinations"
+      ],
+      "properties": {
+        "node": {
+          "type": "string"
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Человек в час"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "size",
+              "share"
+            ],
+            "properties": {
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4
+              },
+              "share": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "speedMin": {
+          "type": "number",
+          "minimum": 0.3
+        },
+        "speedMax": {
+          "type": "number",
+          "minimum": 0.3
+        },
+        "destinations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "peds": {
+      "type": "object",
+      "required": [
+        "nodes",
+        "edges",
+        "sources"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/pedNode"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/pedEdge"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/pedSource"
+          }
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "movements"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "vehicle",
+            "arrow",
+            "pedestrian"
+          ]
+        },
+        "arm": {
+          "type": "string"
+        },
+        "movements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "id связей, для пешеходных групп — id пешеходных рёбер"
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$",
+          "description": "Цвет в виде #RRGGBB или #RGB, другие значения заменяются цветом по умолчанию"
+        },
+        "pedInfo": {
+          "type": "boolean",
+          "description": "Для транспортного светофора: есть информационная секция, предупреждающая водителей о пешеходах (ГОСТ Р 52289-2019, 7.2.6)"
+        },
+        "parent": {
+          "type": "string",
+          "description": "Для допсекции: id основного светофора"
+        },
+        "side": {
+          "enum": [
+            "left",
+            "right"
+          ],
+          "description": "Для допсекции: сторона от основного светофора, как видит водитель"
+        }
+      }
+    },
+    "phase": {
+      "type": "object",
+      "required": [
+        "id",
+        "duration",
+        "green"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "duration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "green": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "signals": {
+      "type": "object",
+      "required": [
+        "groups",
+        "phases"
+      ],
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/group"
+          }
+        },
+        "phases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/phase"
+          }
+        },
+        "timing": {
+          "type": "object",
+          "properties": {
+            "yellow": {
+              "type": "number"
+            },
+            "redYellow": {
+              "type": "number"
+            },
+            "flashGreen": {
+              "type": "number"
+            },
+            "allRed": {
+              "type": "number"
+            },
+            "pedClearance": {
+              "type": "number"
+            }
+          }
+        },
+        "offset": {
+          "type": "number"
+        },
+        "controller": {
+          "enum": [
+            "fixed",
+            "code"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "description": "Код контроллера, нужен при controller: code"
+        }
+      }
+    },
+    "codeNode": {
+      "type": "object",
+      "required": [
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object"
+        },
+        "code": {
+          "type": "string",
+          "description": "Код TypeScript. Нужен только при manual: true, такой код выполняется в изолированной песочнице"
+        },
+        "manual": {
+          "type": "boolean"
+        }
+      }
+    },
+    "sim": {
+      "type": "object",
+      "properties": {
+        "dt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "riskyShare": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "obstructedVisibility": {
+          "type": "number"
+        },
+        "normalVisibility": {
+          "type": "number"
+        },
+        "criticalGapLeft": {
+          "type": "number"
+        },
+        "criticalGapOther": {
+          "type": "number"
+        },
+        "petDanger": {
+          "type": "number"
+        },
+        "petWindow": {
+          "type": "number"
+        },
+        "ttcDanger": {
+          "type": "number"
+        },
+        "crashPersist": {
+          "type": "boolean"
+        },
+        "crashDuration": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1200,
+          "description": "Время до освобождения проезда после столкновения, с"
+        },
+        "historySeconds": {
+          "type": "number"
+        },
+        "violations": {
+          "type": "object",
+          "properties": {
+            "solidLine": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "stopLine": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "redLight": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "illegalTurn": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "description": "Вероятности нарушений для рискованного водителя"
+        },
+        "missedTurn": {
+          "enum": [
+            "reroute",
+            "wait"
+          ],
+          "description": "Не успел перестроиться: reroute — сразу едет по разрешённому из своей полосы направлению, wait — ждёт окна не дольше lcPatience"
+        },
+        "lcPatience": {
+          "type": "number",
+          "minimum": 0
+        },
+        "deadlockSeconds": {
+          "type": "number",
+          "minimum": 1
+        },
+        "deadlockBreak": {
+          "type": "number",
+          "minimum": 0,
+          "description": "0 — водители не выходят из взаимной блокировки"
+        },
+        "slowdownWindow": {
+          "type": "number",
+          "minimum": 10
+        },
+        "slowdownRatio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "noProgressSeconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "busStop": {
+      "type": "object",
+      "required": [
+        "id",
+        "arm",
+        "side",
+        "dist"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "arm": {
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "approach",
+            "exit"
+          ]
+        },
+        "dist": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bay": {
+          "type": "boolean"
+        }
+      }
+    },
+    "busRoute": {
+      "type": "object",
+      "required": [
+        "id",
+        "from",
+        "to",
+        "perHour"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "stops": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "perHour": {
+          "type": "number",
+          "minimum": 0
+        },
+        "length": {
+          "type": "number",
+          "minimum": 6,
+          "maximum": 25
+        },
+        "headway": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "transit": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "stops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/busStop"
+          }
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/busRoute"
+          }
+        },
+        "dwellMin": {
+          "type": "number",
+          "minimum": 0
+        },
+        "dwellMax": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "basemap": {
+      "type": "object",
+      "required": [
+        "origin"
+      ],
+      "properties": {
+        "origin": {
+          "type": "object",
+          "required": [
+            "lat",
+            "lon"
+          ],
+          "properties": {
+            "lat": {
+              "type": "number"
+            },
+            "lon": {
+              "type": "number"
+            }
+          }
+        },
+        "rotation": {
+          "type": "number"
+        },
+        "dx": {
+          "type": "number"
+        },
+        "dy": {
+          "type": "number"
+        },
+        "attribution": {
+          "type": "string"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "k",
+              "g"
+            ],
+            "properties": {
+              "k": {
+                "enum": [
+                  "building",
+                  "road",
+                  "path",
+                  "water",
+                  "green",
+                  "rail",
+                  "parking",
+                  "area"
+                ]
+              },
+              "g": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "closed": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "hw": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "builtin": {
+          "type": "string",
+          "description": "Имя встроенной подложки приложения, например kolpino. Тогда features пустой"
+        }
+      }
+    }
+  }
+}

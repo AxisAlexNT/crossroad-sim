@@ -1,0 +1,61 @@
+# Сборка одного HTML-файла и проверки: типы, движок, подбор фаз, размер не больше 5 МБ, синтаксис ECMAScript 2019.
+# Готовый файл прикладывается к запуску как артефакт.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # раз в неделю — долгий прогон на остановки движения
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Проверка типов
+        run: npm run typecheck
+      - name: Движок без браузера
+        run: npm run test:engine
+      - name: Подбор фаз
+        run: npm run test:opt
+      - name: Сборка
+        run: npm run build
+      - name: Размер и синтаксис ECMAScript 2019
+        run: npm run check:dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crossroad-sim-html
+          path: dist/index.html
+          retention-days: 30
+
+  stall:
+    # долгие прогоны всех вариантов и шаблонов: по расписанию и вручную
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Остановки движения, 2 ч модели, 2 зерна
+        run: npm run test:stall -- 7200 2
