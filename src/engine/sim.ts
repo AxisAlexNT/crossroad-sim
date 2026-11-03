@@ -1,5 +1,6 @@
 import type { InteractiveFrame } from './interactiveRuntime';
 import { timeLoss } from './metrics';
+import { travelDistance } from './kinematics';
 import { decidePriority } from './priority';
 // Микросимуляция перекрёстка.
 // Машины движутся по траекториям по модели следования за лидером IDM, светофор работает по программе.
@@ -97,6 +98,8 @@ export interface Vehicle {
   /** с какого момента стоит (для диагностики), −1 — едет */
   stopSince: number;
   committed: number[];
+  /** Кто адресно передал резерв зоны: конфликт → номер уступившей машины. */
+  acceptedGrants?: Record<number, number>;
   yieldingAt: number;
   /** Кого ждёт при уступании: номер машины, -2 — окончания разрешающего сигнала встречным, -1 — не определено */
   yieldTo: number;
@@ -1464,6 +1467,7 @@ export class Simulation {
       for (const o of this.connLists[B]) {
       if (cf.body && !this.bodyConflictApplies(veh, A, o, B)) continue;
         if (o === veh || o.crashed || o.s >= bEnd + o.len) continue;
+        if (this.acceptSiblingGrant(veh, A, o)) continue;
         // На ещё общем участке машина позади уже следует за нами. Её более ранний
         // въезд не даёт ей права заблокировать ведущую машину перед разделением путей.
         if (veh.phase === 'conn' && o.s < veh.s && this.net.conns[B].siblings.some(sb => sb.conn === A && o.s < sb.until)) continue;
@@ -1534,6 +1538,7 @@ export class Simulation {
       if (cf.body && !this.bodyConflictApplies(veh, A, o, B)) continue;
       if (o.s >= bEnd + o.len) continue;
       if (o.crashed) continue;
+      if (this.acceptSiblingGrant(veh, A, o)) continue;
       const dB = bStart - o.s;
       if (!sees(Math.max(0, dB))) continue;
       if (o.s > bStart) {
@@ -1552,6 +1557,7 @@ export class Simulation {
         // Адресная уступка передаёт право проезда. Старый резерв уступившего
         // больше не позволяет ему тронуться перед принявшей уступку машиной.
         o.committed = o.committed.filter(id => id !== cf.id);
+        if (o.acceptedGrants) delete o.acceptedGrants[cf.id];
         continue;
       }
       // стоит в перекрёстке за другой стоящей машиной и до зоны ещё не доехал: пока впереди не тронутся, помехи нет.
@@ -1564,7 +1570,9 @@ export class Simulation {
           && lead.phase === 'conn' && lead.v < 0.5 && lead.s > o.s
           && this.net.conns[lead.conn].conn.id === this.net.conns[B].conn.id))
       );
-      if (queued && o.s < bStart - 1 && !(o.s > bStart - 4 && this.sweepHits(veh, A, cr.start, cr.end + veh.len, o))) continue;
+      if (queued && o.s < bStart - 1
+        && !(o.committed.includes(cf.id) && o.acceptedGrants?.[cf.id] === veh.id)
+        && !(o.s > bStart - 4 && this.sweepHits(veh, A, cr.start, cr.end + veh.len, o))) continue;
       // Остановившийся перед зоной владелец резерва может снова тронуться.
       // Бесконечное ETA стоящей машины не освобождает её резерв для встречного потока.
       if (o.committed.includes(cr.conflict)) {
@@ -1618,6 +1626,37 @@ export class Simulation {
     return false;
   }
 
+  private acceptSiblingGrant(veh: Vehicle, ci: number, other: Vehicle): boolean {
+    if (other.v >= 0.5 || other.why !== 'yield' || other.conn < 0) return false;
+    const c = this.net.conns[ci], b = this.net.conns[other.conn];
+    if (c.conn.from.arm !== b.conn.from.arm || c.conn.from.lane !== b.conn.from.lane) return false;
+    const position = veh.phase === 'approach' ? veh.s - this.net.arms[veh.origin].cfg.approachLength : veh.s;
+    const granting = this.st.vehicles.find(v => v.id === other.yieldTo);
+    if (!granting || granting.v >= 0.5 || granting.why !== 'yield' || granting.yieldTo !== veh.id) return false;
+    for (const variant of this.net.conns) {
+      if (variant.conn.id !== c.conn.id) continue;
+      const scale = c.path.length / variant.path.length;
+      if (this.connLists[variant.idx].some(o => o !== veh && o.v < 0.5 && o.s * scale > position)) return false;
+    }
+    if (this.firstHit(veh, ci, Math.max(0, position), c.path.length + veh.len, other) < Infinity) return false;
+    // Принятая адресная уступка сохраняет очередность проезда зоны,
+    // даже когда принявший уступку водитель сменит состояние на «движется».
+    if (granting.phase === 'conn' && granting.conn >= 0
+      && this.firstHit(veh, ci, Math.max(0, position), c.path.length + veh.len, granting) === Infinity) {
+      for (const ref of c.conflicts) {
+        const zone = this.net.conflicts[ref.conflict];
+        if (ref.other !== granting.conn || zone.same) continue;
+        const start = ref.side === 'a' ? zone.bStart : zone.aStart;
+        if (granting.s >= start - 1 || position - veh.len >= ref.end) continue;
+        granting.committed = granting.committed.filter(id => id !== ref.conflict);
+        if (granting.acceptedGrants) delete granting.acceptedGrants[ref.conflict];
+        if (!veh.committed.includes(ref.conflict)) veh.committed.push(ref.conflict);
+        (veh.acceptedGrants ??= {})[ref.conflict] = granting.id;
+      }
+    }
+    return true;
+  }
+
   /**
    * Не въезжать в зону конфликта, если в перекрёстке есть машины встречного по этой зоне манёвра,
    * а сразу за зоной придётся остановиться и уступить: иначе машина встанет у них на пути, ПДД 13.2
@@ -1631,19 +1670,20 @@ export class Simulation {
     // места для всего кузова за зоной. Это касается и ещё общего участка вариантов.
     const c = this.net.conns[ci];
     const position = -offset;
-    const blocksStorage = (o: Vehicle) => {
+    const blocksStorage = (o: Vehicle, sibling = false) => {
       if (o === veh || o.s <= position) return false;
       // Тормозящий лидер может ещё двигаться, но уже останавливаться внутри
       // нужного нам запаса. Проверяем прогноз остановки при текущем замедлении.
       const stop = o.v < 0.5 ? o.s : o.a < -0.1 ? o.s + o.v * o.v / (-2 * o.a) : Infinity;
       if (stop - o.len >= cr.end + veh.len + veh.s0) return false;
+      if (sibling && this.acceptSiblingGrant(veh, ci, o)) return false;
       this.blocker = o.id;
       return true;
     };
-    if (this.connLists[ci].some(blocksStorage)) return true;
+    if (this.connLists[ci].some(o => blocksStorage(o))) return true;
     for (const sibling of c.siblings) {
       if (cr.start >= sibling.until) continue;
-      if (this.connLists[sibling.conn].some(o => o.s - o.len <= sibling.until && blocksStorage(o))) return true;
+      if (this.connLists[sibling.conn].some(o => o.s - o.len <= sibling.until && blocksStorage(o, true))) return true;
     }
     if (!this.connLists[cr.other].some((o) => o !== veh && !o.crashed)) return false;
     const brk = this.cfg.sim.deadlockBreak;
@@ -1875,7 +1915,7 @@ export class Simulation {
     if (veh.viol.turn && ill !== undefined) {
       veh.illegal = true;
       veh.conn = ill;
-      veh.committed = [];
+      veh.committed = []; veh.acceptedGrants = undefined;
       veh.targetLane = veh.lane;
       veh.solidCross = false;
       veh.lcHelper = -1;
@@ -1895,7 +1935,7 @@ export class Simulation {
     veh.wrongLane = false;
     veh.solidCross = false;
     veh.conn = -1;
-    veh.committed = [];
+    veh.committed = []; veh.acceptedGrants = undefined;
     st.counters.missedTurns++;
     this.addLog('info', 'missed-turn', `Машина #${veh.id} не успела занять полосу на «${this.armName(veh.origDest)}» до сплошной и поехала на «${this.armName(best)}», как разрешено из её полосы`, undefined, veh.id);
   }
@@ -1907,6 +1947,7 @@ export class Simulation {
     const scale = sameMovement ? a.path.length / b.path.length : 1;
     const front = other.s * scale, rear = (other.s - other.len) * scale;
     if (front <= veh.s || rear > until) return null;
+    if (this.acceptSiblingGrant(veh, veh.conn, other)) return null;
     let gap = rear - veh.s;
     // Длины вариантов различаются. Даже приведённая координата не описывает
     // выступающий на повороте угол кузова; вблизи проверяем весь доступный путь.
@@ -2062,7 +2103,7 @@ export class Simulation {
             veh.yellowDecision = 2;
             // Резерв попытки въезда не переживает остановку перед запрещающим
             // сигналом: на следующем разрешении конфликты проверяются заново.
-            veh.committed = [];
+            veh.committed = []; veh.acceptedGrants = undefined;
           }
           let stop = true;
           if (this.yellowMain[veh.conn]) {
@@ -2457,7 +2498,7 @@ export class Simulation {
         veh.lcT = 0;
         veh.conn = -1;
         veh.illegal = false;
-        veh.committed = [];
+        veh.committed = []; veh.acceptedGrants = undefined;
         veh.yieldingAt = -1;
         veh.yieldTo = -1;
         veh.stuckSince = -1;
@@ -2502,8 +2543,7 @@ export class Simulation {
       if (veh.crashed) { veh.v = 0; continue; }
       const a = acc.get(veh) ?? 0;
       veh.a = a;
-      let ds = veh.v * dt + 0.5 * a * dt * dt;
-      if (ds < 0) ds = (veh.v * veh.v) / (2 * Math.max(0.1, -a));
+      const ds = travelDistance(veh.v, a, dt);
       veh.v = Math.max(0, veh.v + a * dt);
       veh.s += Math.max(0, ds);
       if (veh.tEnter < st.t) {

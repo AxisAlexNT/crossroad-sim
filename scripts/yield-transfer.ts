@@ -22,12 +22,14 @@ try {
   const receiver = make(10001, a.idx, cr.start - 15, 2);
   const giver = make(10002, b.idx, startB - 6, .4);
   giver.committed = [cf.id]; giver.yieldingAt = cf.id; giver.yieldTo = receiver.id;
+  giver.acceptedGrants = { [cf.id]: 99999 };
   sim.st.vehicles = [receiver, giver]; sim.st.peds = [];
   for (const v of sim.st.vehicles) sim.pose(v);
   const internal = sim as unknown as { index(): void; mustWait(v: Vehicle, a: number, cr: ConflictRef, start: number, end: number): boolean };
   internal.index(); sim.permit[a.idx] = 'main'; sim.permit[b.idx] = 'main';
   assert.equal(internal.mustWait(receiver, a.idx, cr, 15, cr.end - receiver.s), false);
   assert.ok(!giver.committed.includes(cf.id), 'Accepting an explicit yield must revoke the yielding participant’s old reservation');
+  assert.equal(giver.acceptedGrants[cf.id], undefined, 'Revoking a reservation must also clear its former addressed grant');
   giver.committed = [cf.id]; giver.yieldTo = 99999;
   assert.equal(internal.mustWait(receiver, a.idx, cr, 15, cr.end - receiver.s), true);
   assert.ok(giver.committed.includes(cf.id), 'Yielding to a third participant must preserve the reservation');

@@ -20,7 +20,7 @@
     "licenses": "node scripts/licenses.mjs",
     "osm": "tsx scripts/prepare-osm.ts",
     "check:dist": "node scripts/check-dist.mjs",
-    "test": "npm run typecheck && npm run test:session && npm run test:body-corridor && npm run test:engine && npm run test:opt && npm run test:report && npm run test:interactive && npm run test:reservation && npm run test:regression && npm run test:numerical-regression",
+    "test": "npm run typecheck && npm run test:session && npm run test:kinematics && npm run test:body-corridor && npm run test:engine && npm run test:opt && npm run test:report && npm run test:interactive && npm run test:reservation && npm run test:regression && npm run test:numerical-regression",
     "test:regression": "node --import tsx scripts/regression.ts",
     "test:interactive": "node --import tsx scripts/interactive-smoke.ts && node --import tsx scripts/interactive-channel-smoke.ts",
     "test:reservation": "node --import tsx scripts/reservation-order.ts && node --import tsx scripts/occupied-zone.ts && node --import tsx scripts/reservation-long.ts",
@@ -28,7 +28,8 @@
     "test:convergence": "node --import tsx scripts/convergence.ts",
     "test:numerical-regression": "node --import tsx scripts/numerical-regression.ts",
     "test:body-corridor": "node --import tsx scripts/body-corridor.ts",
-    "test:report": "node --import tsx scripts/signal-scene.ts && node --import tsx scripts/report-run.ts"
+    "test:report": "node --import tsx scripts/signal-scene.ts && node --import tsx scripts/report-run.ts",
+    "test:kinematics": "node --import tsx scripts/kinematics.ts"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

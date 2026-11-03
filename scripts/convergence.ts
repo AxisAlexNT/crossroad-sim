@@ -14,7 +14,10 @@ const only = process.argv[4];
 const output = process.argv[5];
 if (!Number.isInteger(horizon) || horizon < 60 || horizon > 86400 || !Number.isInteger(count) || count < 10 || count > 100) throw new Error('Нужны горизонт от 60 до 86400 с и от 10 до 100 зёрен.');
 const warmup = 300;
-const steps = [.2, .1, .05];
+const steps = process.argv[6] ? process.argv[6].split(',').map(Number) : [.2, .1, .05];
+if (steps.length !== 3 || steps.some((dt, i) => !Number.isFinite(dt) || dt < .02 || dt > .5 || (i > 0 && dt >= steps[i - 1]))) {
+  throw new Error('Нужны три строго убывающих шага от 0,02 до 0,5 с, разделённые запятыми.');
+}
 const seeds = Array.from({ length: count }, (_, i) => 42 + i * 1000);
 // Заранее выбранные инженерные допуски, а не результат подгонки к прогонам.
 const metrics = [

@@ -1,2 +1,2 @@
 /** Версия вычислительных правил, независимая от формата сохранений. */
-export const ENGINE_VERSION = '2.1-dev.34';
+export const ENGINE_VERSION = '2.1-dev.47';
