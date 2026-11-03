@@ -29,12 +29,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Проверка типов
-        run: npm run typecheck
-      - name: Движок без браузера
-        run: npm run test:engine
-      - name: Подбор фаз
-        run: npm run test:opt
+      - name: Полная регрессия
+        run: npm test
       - name: Сборка
         run: npm run build
       - name: Размер и синтаксис ECMAScript 2019
@@ -57,5 +53,33 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Остановки движения, 2 ч модели, 2 зерна
-        run: npm run test:stall -- 7200 2
+      - name: Строгая проверка, 2 ч модели, 10 зёрен
+        env:
+          STRICT: '1'
+        run: npm run test:stall -- 7200 10 '' 42 stall.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stall
+          path: stall.json
+          retention-days: 30
+
+  convergence:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Чувствительность к шагу, 30 зёрен
+        run: npm run test:convergence -- 1200 30 '' convergence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: convergence
+          path: convergence.json
+          retention-days: 30

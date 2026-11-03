@@ -162,7 +162,7 @@ export function sceneSvg(net: Network, cfg: ModelConfig, o: SceneOptions): strin
     const tr = `translate(${f(h.p.x)},${f(-h.p.y)})`;
     if (h.kind === 'pedestrian') {
       heads += `<g transform="${tr}"><title>${esc(h.name)}</title><rect x="${-HEAD.pw / 2}" y="${-HEAD.ph / 2}" width="${HEAD.pw}" height="${HEAD.ph}" rx="0.35" fill="${pal.housing}" stroke="${pal.housingStroke}" stroke-width="0.15"/>` +
-        `<circle cy="-0.72" r="0.55" fill="${l === 'R' || l === 'OFF' || l === 'Y' || l === 'RY' ? pal.red : pal.lampOff}"/><circle cy="0.72" r="0.55" fill="${l === 'G' ? pal.green : pal.lampOff}"/></g>`;
+        `<circle cy="-0.72" r="0.55" fill="${l === 'R' || l === 'Y' || l === 'RY' ? pal.red : pal.lampOff}"/><circle cy="0.72" r="0.55" fill="${l === 'G' ? pal.green : pal.lampOff}"/></g>`;
     } else if (h.kind === 'arrow') {
       const on = l === 'G';
       heads += `<g transform="${tr}"><title>${esc(h.name)}</title><rect x="${-HEAD.aw / 2}" y="${-HEAD.aw / 2}" width="${HEAD.aw}" height="${HEAD.aw}" rx="0.45" fill="${pal.housing}" stroke="${pal.housingStroke}" stroke-width="0.15"/>` +

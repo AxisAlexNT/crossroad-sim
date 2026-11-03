@@ -194,3 +194,20 @@ export function groupBands(p: SignalProgram, g: SignalGroup): Array<{ from: numb
   if (cur !== null) out.push({ from, to: cycle, lamp: cur });
   return out;
 }
+
+/** Остаток разрешающего/запрещающего интервала. null — прогноз неизвестен или сигнал постоянный. */
+export function signalRemaining(p: SignalProgram, rt: SignalRuntime, g: SignalGroup, t: number): number | null {
+  if (p.controller !== 'fixed') return null;
+  const { segs, cycle } = buildTimeline(p);
+  if (cycle <= 0) return null;
+  const current = segs.find(s => s.phaseIdx === rt.phaseIdx && s.kind === rt.segment);
+  if (!current) return null;
+  const tc = current.start + t - rt.segStart;
+  const permits = lampPermits(lampOf(p, rt, g, t));
+  const boundaries = segs.flatMap(s => [s.start, s.end]);
+  for (const boundary of boundaries.concat(boundaries.map(x => x + cycle)).sort((a, b) => a - b)) {
+    if (boundary <= tc + 1e-7) continue;
+    if (lampPermits(lampAtCycleTime(p, g, (boundary + 1e-7) % cycle)) !== permits) return Math.max(0, boundary - tc);
+  }
+  return null;
+}

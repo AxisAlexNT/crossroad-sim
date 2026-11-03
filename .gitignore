@@ -1,2 +1,44 @@
 node_modules/
 dist/
+
+# В корне разрешены только публичные файлы и каталоги проекта.
+# Локальные материалы и настройки не добавляются через git add .
+/*
+!/.github/
+!/.gitignore
+!/.nvmrc
+!/LICENSE
+!/README.md
+!/THIRD_PARTY_LICENSES.txt
+!/docs/
+!/index.html
+!/package.json
+!/package-lock.json
+!/schema/
+!/scripts/
+!/src/
+!/tsconfig.json
+!/validation/
+!/vite.config.ts
+
+# Локальные секреты и временные файлы внутри публичных каталогов.
+.env
+.env.*
+*.pem
+*.key
+*.log.tmp
+*~
+
+# В репозитории остаются только выбранные отчёты и данные регрессионного теста.
+/validation/*
+!/validation/browser-startup-v34.json
+!/validation/browser-stress-v33.json
+!/validation/convergence-v33.json
+!/validation/regression-v34.log
+!/validation/replay-v25-v5-20042.json
+!/validation/revision-v34.json
+!/validation/snapshot-stress-v33.json
+!/validation/stall-v33.json
+!/validation/wait-v33-v1-1042-455.json
+!/validation/wait-v33-v2-5042-925.json
+/docs/validation-history.md

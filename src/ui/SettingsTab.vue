@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref } from 'vue';
 import { app, download, exportSession, fileBase, importSession, resetModel, simRef, toast } from './store';
 import { exportPdf } from './pdf';
 import { DARK, LIGHT, sceneSvg } from './scene';
@@ -27,14 +27,19 @@ function loadJson(e: Event) {
       .catch((err: unknown) => toast('Не удалось загрузить: ' + (err instanceof Error ? err.message : String(err))));
   });
 }
+let pdfAbort: AbortController | null = null;
+onBeforeUnmount(() => pdfAbort?.abort());
 async function makePdf() {
+  pdfAbort = new AbortController();
   pdf.busy = true;
   try {
-    await exportPdf({ source: pdf.source, unit: pdf.unit, amount: pdf.amount });
+    await exportPdf({ source: pdf.source, unit: pdf.unit, amount: pdf.amount, signal: pdfAbort.signal });
   } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') return;
     toast('Ошибка экспорта в PDF: ' + (err instanceof Error ? err.message : String(err)));
   } finally {
     pdf.busy = false;
+    pdfAbort = null;
   }
 }
 const osmInput = ref<HTMLInputElement | null>(null);
@@ -112,9 +117,10 @@ function makeSvg() {
         <label>Длина прогона
           <select v-model="pdf.unit" :disabled="pdf.source === 'current'"><option value="seconds">секунд модели</option><option value="steps">переключений фаз</option></select>
         </label>
-        <label>Сколько <input v-model.number="pdf.amount" type="number" min="1" step="1" :disabled="pdf.source === 'current'" /></label>
+        <label>Сколько <input v-model.number="pdf.amount" type="number" min="1" :max="pdf.unit === 'seconds' ? 86400 : 1000" step="1" :disabled="pdf.source === 'current'" /></label>
       </div>
       <button class="btn primary" :disabled="pdf.busy" @click="makePdf">{{ pdf.busy ? 'Готовлю PDF…' : 'Экспорт в PDF' }}</button>
+      <button v-if="pdf.busy" class="btn" @click="pdfAbort?.abort()">Отменить экспорт</button>
       <div class="small muted">Схема перекрёстка, пиктограммы и описание фаз, ленточный график, графики метрик и проверки. На каждой странице есть пометка, что это результаты ограниченного моделирования.</div>
     </section>
 
@@ -239,6 +245,7 @@ function makeSvg() {
       <h3>Диагностика движения</h3>
       <div class="grid3">
         <label>Взаимная блокировка фиксируется через, с <input v-model.number="sim.deadlockSeconds" type="number" min="3" max="120" step="1" /></label>
+        <label><input v-model="sim.diagnosticRecovery" type="checkbox" /> Диагностический разъезд сквозь препятствия — результаты нельзя сравнивать</label>
         <label>Водители выходят из блокировки через, с <input v-model.number="sim.deadlockBreak" type="number" min="0" max="600" step="5" /></label>
         <label>Нет проезда при разрешающем сигнале, с <input v-model.number="sim.noProgressSeconds" type="number" min="20" max="900" step="10" /></label>
         <label>Окно средней скорости, с <input v-model.number="sim.slowdownWindow" type="number" min="30" max="900" step="10" /></label>

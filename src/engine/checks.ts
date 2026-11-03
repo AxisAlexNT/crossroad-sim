@@ -169,6 +169,10 @@ function runChecksRaw(cfg: ModelConfig): CheckResult[] {
       const key = `${cf.a}-${cf.b}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      if (cf.body) {
+        add({ level: 'warn', code: 'body-corridor', msg: `Фаза «${ph.name}»: габаритные коридоры «${lbl(cf.a)}» и «${lbl(cf.b)}» могут пересекаться для части типов транспорта. Требуется проверка габаритов и очередности движения; пересечение осей траекторий отсутствует.`, where: `фаза ${pi + 1}` });
+        continue;
+      }
       const turnA = a.kind === 'left' || a.kind === 'uturn';
       const turnB = b.kind === 'left' || b.kind === 'uturn';
       const opposite = rel.opposite[a.conn.from.arm] === b.conn.from.arm;
@@ -275,9 +279,9 @@ function runChecksRaw(cfg: ModelConfig): CheckResult[] {
       const draft = base + 5;
       const half = e.kind === 'half' ? ' до островка безопасности' : '';
       if (green < base) {
-        add({ level: 'warn', code: 'ped-time', msg: `Переход «${pedEdgeLabel(cfg, net, ei)}»${half}, длина ${road.toFixed(1)} м: разрешающий сигнал ${green.toFixed(0)} с меньше времени перехода при расчётной скорости 1,2 м/с из методического руководства, которое равно ${base.toFixed(0)} с.`, source: 'mintrans-guide' });
+        add({ level: 'warn', code: 'ped-time', msg: `Переход «${pedEdgeLabel(cfg, net, ei)}»${half}, длина ${road.toFixed(1)} м: разрешающий сигнал ${green.toFixed(2)} с меньше времени перехода при расчётной скорости 1,2 м/с из методического руководства, которое равно ${base.toFixed(2)} с.`, source: 'mintrans-guide' });
       } else if (green < draft) {
-        add({ level: 'warn', code: 'ped-time-draft', msg: `Переход «${pedEdgeLabel(cfg, net, ei)}»${half}: разрешающий сигнал ${green.toFixed(0)} с. В проекте стандарта о безопасности пешеходов предусмотрено не меньше B/1,2 + 5 = ${draft.toFixed(0)} с.`, source: 'gost-draft' });
+        add({ level: 'warn', code: 'ped-time-draft', msg: `Переход «${pedEdgeLabel(cfg, net, ei)}»${half}: разрешающий сигнал ${green.toFixed(2)} с. В проекте стандарта о безопасности пешеходов предусмотрено не меньше B/1,2 + 5 = ${draft.toFixed(2)} с, целая настройка не менее ${Math.ceil(draft)} с.`, source: 'gost-draft' });
       }
     }
   }

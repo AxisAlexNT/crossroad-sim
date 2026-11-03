@@ -6,13 +6,16 @@ import { DEFAULT_PRESET, defaultModel, kolpinoModel, applyMarkings, markingsFor,
 import { genConnections, genPedGraph, reconcile } from '../engine/generate';
 import { compileModel, customCodeNodes, hasCustomCode } from '../engine/compile';
 import { sandboxFailure, sandboxReady } from '../engine/sandbox';
-import { ensureSandbox } from './sandboxLoader';
+import { InteractiveClient } from './interactiveClient';
+import type { InteractiveCommand } from '../engine/interactiveRuntime';
+import { sandboxWasm, ensureSandbox } from './sandboxLoader';
 import { Simulation } from '../engine/sim';
 import { runChecks, type CheckResult } from '../engine/checks';
 import { genControllerCode, genExitCode, genLaneChooserCode, genSpawnerCode } from '../engine/codegen';
 import { armLabel } from '../engine/generate';
 import { normalizeModel, serializeModel } from '../engine/model';
 import { checkFileSize } from '../engine/limits';
+import { migrateSession, serializeSession, type Preferences } from '../engine/session';
 
 export type TabId = 'sim' | 'editor' | 'events' | 'charts' | 'opt' | 'settings' | 'about';
 
@@ -34,19 +37,24 @@ export type Selection =
 const STORAGE_KEY = 'crossroad-sim-session-v2';
 const OLD_STORAGE_KEY = 'crossroad-sim-session-v1';
 
-interface Saved { cfg?: unknown; theme?: 'dark' | 'light'; presetId?: string; draftAsError?: boolean }
-
-function loadSaved(): { cfg: ModelConfig | null; theme?: 'dark' | 'light'; presetId?: string; draftAsError?: boolean } {
-  for (const key of [STORAGE_KEY, OLD_STORAGE_KEY]) {
+let storageProtected = false;
+let storageIssue = '';
+function loadSaved(): { cfg: ModelConfig | null; presetId?: string } & Preferences {
+  for (const key of [STORAGE_KEY, OLD_STORAGE_KEY, STORAGE_KEY + '-last-good']) {
     try {
       const raw = localStorage.getItem(key);
       if (!raw) continue;
-      const data = JSON.parse(raw) as Saved;
-      let cfg: ModelConfig | null = null;
-      try { cfg = data.cfg ? normalizeModel(data.cfg) : null; } catch { cfg = null; }
-      return { cfg, theme: data.theme, presetId: data.presetId, draftAsError: data.draftAsError === true };
+      const loaded = migrateSession(JSON.parse(raw));
+      // Сохраняем исходную запись до любых автоматических преобразований.
+      if (!localStorage.getItem(STORAGE_KEY + '-original')) localStorage.setItem(STORAGE_KEY + '-original', raw);
+      if (loaded.report.warnings.length) {
+        storageProtected = true;
+        storageIssue = 'Сохранение восстановлено с преобразованиями. Исходная запись сохранена; автоматическая перезапись отключена. ' + loaded.report.warnings.join(' ');
+      }
+      return { cfg: loaded.cfg, presetId: loaded.presetId, ...loaded.preferences };
     } catch {
-      /* хранилище недоступно или повреждено */
+      storageProtected = true;
+      storageIssue = 'Не удалось полностью восстановить сохранение. Исходная запись не перезаписана. Можно импортировать JSON-сессию.';
     }
   }
   return { cfg: null };
@@ -56,6 +64,8 @@ const saved = loadSaved();
 
 export const app = reactive({
   tab: 'sim' as TabId,
+  storageIssue,
+  showTimers: saved.showTimers ?? false,
   theme: (saved.theme ?? 'dark') as 'dark' | 'light',
   cfg: (saved.cfg ?? defaultModel(DEFAULT_PRESET)) as ModelConfig,
   presetId: saved.presetId ?? DEFAULT_PRESET,
@@ -122,9 +132,74 @@ export const app = reactive({
   logTick: 0,
   highlightVid: -1,
   toast: '' as string,
+  interactiveError: '',
 });
 
 export const simRef = shallowRef<Simulation | null>(null);
+
+let interactiveClient: InteractiveClient | null = null;
+let interactiveEpoch = 0;
+let interactiveChain: Promise<unknown> = Promise.resolve();
+let interactiveQueued = 0;
+
+/** Команды сериализуются; ответы прежней модели после пересборки отбрасываются. */
+export function runInteractive(command: InteractiveCommand, details = false): Promise<boolean> {
+  const epoch = interactiveEpoch;
+  if (interactiveQueued >= 8) return Promise.reject(new Error('Дождитесь завершения команды управления временем.'));
+  interactiveQueued++;
+  const task = interactiveChain.then(async () => {
+    if (epoch !== interactiveEpoch) return false;
+    const client = interactiveClient;
+    if (!client) throw new Error('Фоновая модель ещё не готова.');
+    const frame = await client.request(command, details);
+    if (epoch !== interactiveEpoch || !frame) return false;
+    simRef.value?.acceptFrame(frame);
+    refreshStats();
+    if (frame.details) app.logTick++;
+    return frame.complete;
+  }).catch(error => {
+    if (epoch === interactiveEpoch) {
+      app.playing = false;
+      app.interactiveError = error instanceof Error ? error.message : String(error);
+    }
+    throw error;
+  });
+  interactiveChain = task.catch(() => {});
+  return task.finally(() => { interactiveQueued--; });
+}
+
+function startInteractive(cfg: ModelConfig, target: number) {
+  const epoch = ++interactiveEpoch;
+  app.interactiveError = '';
+  interactiveClient?.dispose();
+  interactiveClient = null;
+  interactiveChain = (async () => {
+    const wasm = hasCustomCode(cfg) ? (await sandboxWasm()).slice().buffer : undefined;
+    if (epoch !== interactiveEpoch) return;
+    const client = new InteractiveClient(wasm);
+    interactiveClient = client;
+    let frame = await client.request({ type: 'init', cfg }, true);
+    if (epoch !== interactiveEpoch || !frame) return;
+    simRef.value?.acceptFrame(frame);
+    while (frame.state.t < target) {
+      frame = await client.request({ type: 'advance', target }, false);
+      if (epoch !== interactiveEpoch || !frame) return;
+      simRef.value?.acceptFrame(frame);
+    }
+    if (target > 0) {
+      frame = await client.request({ type: 'snapshot' }, true);
+      if (epoch !== interactiveEpoch || !frame) return;
+      simRef.value?.acceptFrame(frame);
+    }
+    refreshStats();
+    app.logTick++;
+  })().catch(error => {
+    if (epoch !== interactiveEpoch) return;
+    app.playing = false;
+    app.interactiveError = error instanceof Error ? error.message : String(error);
+    toast('Ошибка фоновой модели: ' + (error instanceof Error ? error.message : String(error)));
+  });
+}
 
 /** Предустановки светофорных программ подходят только к модели с такими же группами и подходами */
 export function presetsApplicable(cfg: ModelConfig = app.cfg): boolean {
@@ -160,7 +235,7 @@ export function rebuild(keepTime = false) {
   for (const e of errors) sim.addLog('error', 'compile', e);
   simRef.value?.dispose();
   simRef.value = sim;
-  if (keepTime && prevT > 0) sim.runUntil(Math.min(prevT, 600), 3000);
+  startInteractive(JSON.parse(JSON.stringify(app.cfg)) as ModelConfig, keepTime ? Math.min(prevT, 600) : 0);
   try { app.checks = runChecks(app.cfg, { draftAsError: app.draftAsError }); } catch { app.checks = []; }
   app.version++;
   app.logTick++;
@@ -186,12 +261,12 @@ export function refreshStats() {
   s.crossings = st.counters.crossings;
   s.collisions = st.counters.collisions;
   const se = sim.series;
-  s.avgWait = se.avgWait[se.avgWait.length - 1] ?? 0;
+  s.avgWait = Number.isFinite(se.avgWait[se.avgWait.length - 1]) ? se.avgWait[se.avgWait.length - 1] : 0;
   s.throughput = se.throughput[se.throughput.length - 1] ?? 0;
   s.maxQueue = st.maxQueue;
   s.peds = st.peds.reduce((a, p) => a + p.size, 0);
   s.pedDone = st.counters.pedDone;
-  s.pedWait = se.pedWait[se.pedWait.length - 1] ?? 0;
+  s.pedWait = Number.isFinite(se.pedWait[se.pedWait.length - 1]) ? se.pedWait[se.pedWait.length - 1] : 0;
   s.pedDangers = st.counters.pedDangers;
   s.pedHits = st.counters.pedHits;
   const c = st.counters;
@@ -233,6 +308,7 @@ watch(
   { deep: true },
 );
 
+watch(() => app.showTimers, saveSession);
 watch(() => app.theme, () => { saveSession(); applyTheme(); });
 watch(() => app.draftAsError, () => {
   saveSession();
@@ -246,11 +322,37 @@ export function applyTheme() {
 }
 
 export function saveSession() {
+  if (storageProtected) return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ cfg: app.cfg, theme: app.theme, presetId: app.presetId, draftAsError: app.draftAsError }));
+    const text = exportSession();
+    const previous = localStorage.getItem(STORAGE_KEY);
+    if (previous) { migrateSession(JSON.parse(previous)); localStorage.setItem(STORAGE_KEY + '-last-good', previous); }
+    localStorage.setItem(STORAGE_KEY, text);
+    app.storageIssue = '';
   } catch {
-    /* хранилище недоступно — не страшно */
+    app.storageIssue = 'Не удалось сохранить настройки в браузере. Скачайте JSON-сессию для сохранения изменений.';
   }
+}
+
+export function exportSavedOriginal() {
+  try {
+    const text = localStorage.getItem(STORAGE_KEY + '-original') ?? localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(OLD_STORAGE_KEY);
+    if (text) download('session-original.json', text, 'application/json');
+    else toast('Исходное сохранение недоступно');
+  } catch { toast('Хранилище браузера недоступно'); }
+}
+
+export async function resumeSaving() {
+  const answer = await ask('Сохранение восстановленной модели', 'Текущая модель станет основным сохранением. Перед этим можно скачать исходную запись.', [],
+    [{ id: 'save', label: 'Сохранить текущую', kind: 'primary' }, { id: 'cancel', label: 'Отмена' }]);
+  if (answer !== 'save') return;
+  try {
+    const current = localStorage.getItem(STORAGE_KEY);
+    if (current) localStorage.setItem(STORAGE_KEY + '-before-recovery', current);
+    localStorage.setItem(STORAGE_KEY, exportSession());
+    storageProtected = false;
+    app.storageIssue = '';
+  } catch { app.storageIssue = 'Хранилище недоступно. Скачайте JSON-сессию.'; }
 }
 
 export function applyPreset(id: string) {
@@ -331,18 +433,26 @@ export function regenController(cfg: ModelConfig = app.cfg) {
 
 /** Сессия: модель и выбранная предустановка */
 export function exportSession(): string {
-  return JSON.stringify({ format: 'crossroad-sim-session', version: 2, savedAt: new Date().toISOString(), presetId: app.presetId, cfg: JSON.parse(serializeModel(app.cfg)) }, null, 2);
+  return serializeSession(app.cfg, app.presetId, { theme: app.theme, draftAsError: app.draftAsError, showTimers: app.showTimers });
 }
 
 /** Загрузить сессию из файла. false — пользователь отказался */
 export async function importSession(text: string): Promise<boolean> {
-  checkFileSize(text.length);
+  checkFileSize(new TextEncoder().encode(text).length);
   const data = JSON.parse(text) as unknown;
-  const cfg = await vetCustomCode(normalizeModel(data));
+  const loaded = migrateSession(data);
+  if (loaded.report.warnings.length) {
+    const choice = await ask('Преобразование сессии', 'Часть данных изменится. Сохраните исходный файл для восстановления.', loaded.report.warnings,
+      [{ id: 'load', label: 'Загрузить', kind: 'primary' }, { id: 'cancel', label: 'Отмена' }]);
+    if (choice !== 'load') return false;
+  }
+  const cfg = await vetCustomCode(loaded.cfg);
   if (!cfg) return false;
+  const compiled = compileModel(cfg);
+  if (compiled.errors.length) throw new Error(compiled.errors.join('\n'));
   app.cfg = cfg;
-  const presetId = (data as { presetId?: unknown }).presetId;
-  if (typeof presetId === 'string' && PRESETS.some((p) => p.id === presetId)) app.presetId = presetId;
+  app.presetId = loaded.presetId && PRESETS.some((p) => p.id === loaded.presetId) ? loaded.presetId : 'custom';
+  Object.assign(app, loaded.preferences);
   app.selected = null;
   return true;
 }

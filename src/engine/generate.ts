@@ -31,7 +31,7 @@ export const TIMING_DEFAULT = { yellow: 3, redYellow: 2, flashGreen: 3, allRed: 
 export const SIM_DEFAULT: SimSettings = {
   dt: 0.1,
   seed: 42,
-  riskyShare: 0.15,
+  riskyShare: 0,
   obstructedVisibility: 20,
   normalVisibility: 150,
   criticalGapLeft: 5,
@@ -50,7 +50,8 @@ export const SIM_DEFAULT: SimSettings = {
   drivers: { accelMin: 2.4, accelMax: 3.0, heavyAccel: 1.35, speedMin: 0.9, speedMax: 1.1, headwayMin: 1.0, headwayMax: 1.4, gap: 1.5, riskyFactor: 0.7, reactionMin: 0.3, reactionMax: 0.8 },
   violations: { solidLine: 0.25, stopLine: 0.3, redLight: 0.15, illegalTurn: 0.1 },
   deadlockSeconds: 15,
-  deadlockBreak: 30,
+  deadlockBreak: 0,
+  diagnosticRecovery: false,
   slowdownWindow: 120,
   slowdownRatio: 0.5,
   noProgressSeconds: 90,

@@ -3,6 +3,7 @@
 // Работает в двух контекстах: живая модель симулятора и черновик в редакторе.
 // Режимы правки: связи полос, пешеходный граф, подходы (поворот, переход), остановки.
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { signalRemaining } from '../engine/signals';
 import { app, simRef } from './store';
 import { editor, useCtx, type Ctx } from './ctx';
 import { onRender, requestRender } from './loop';
@@ -541,14 +542,18 @@ function render(alpha: number) {
   for (let k = pi; k < pedPool.length; k++) pedPool[k].style.display = 'none';
   for (let k = m; k < markPool.length; k++) markPool[k].style.display = 'none';
   // светофоры, яркость рёбер и текущие точки конфликтов
-  const key = st.lampSig + (flashOn ? '1' : '0') + app.conflictMode + app.version;
+  const key = st.lampSig + (flashOn ? '1' : '0') + app.conflictMode + app.version + (app.showTimers ? Math.floor(st.t) : 'off');
   if (key !== lastLampKey && svgEl.value) {
     lastLampKey = key;
     const root = svgEl.value;
     for (const g of sim.cfg.signals.groups) {
       const l = st.lamps[g.id] ?? 'R';
       const shown = l === 'FG' ? (flashOn ? 'G' : 'OFF') : l;
-      root.querySelectorAll(`[data-group="${CSS.escape(g.id)}"]`).forEach((el) => el.setAttribute('data-lamp', shown));
+      root.querySelectorAll(`[data-group="${CSS.escape(g.id)}"]`).forEach((el) => {
+        el.setAttribute('data-lamp', shown);
+        const timer = el.querySelector('.signal-timer');
+        if (timer) { const remaining = signalRemaining(sim.cfg.signals, st.sig, g, st.t); timer.textContent = remaining === null ? '—' : String(Math.ceil(remaining)); }
+      });
     }
     root.querySelectorAll('[data-conn]').forEach((el) => {
       const ci = sim.net.connById.get(el.getAttribute('data-conn')!);
@@ -580,7 +585,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => { off?.(); ro?.disconnect(); });
 watch(() => app.version, () => { lastLampKey = ''; requestRender(); });
-watch(() => [app.highlightVid, app.conflictMode, app.showGraph], () => { lastLampKey = ''; requestRender(); });
+watch(() => [app.highlightVid, app.conflictMode, app.showGraph, app.showTimers], () => { lastLampKey = ''; requestRender(); });
 watch(() => cfg.value.arms.map((a) => a.id + a.angle).join(), () => setTimeout(() => fit(), 350));
 
 const selected = C.selected;
@@ -676,6 +681,7 @@ defineExpose({ svgEl, fit });
       <g class="heads">
         <g v-for="h in heads" :key="h.key" :data-group="h.group" :transform="`translate(${h.x},${h.y})`" class="head" :class="[h.kind, { sel: selected?.kind === 'group' && selected.id === h.group }]" data-lamp="R">
           <title>{{ h.name }}</title>
+          <text v-if="live && app.showTimers" class="signal-timer" x="2.5" y="0" font-size="2.7" fill="currentColor">—</text>
           <template v-if="h.kind === 'pedestrian'">
             <rect :x="-HEAD.pw / 2" :y="-HEAD.ph / 2" :width="HEAD.pw" :height="HEAD.ph" rx="0.35" class="housing" />
             <circle cy="-0.72" r="0.55" class="lamp lamp-pr" />
@@ -748,22 +754,25 @@ defineExpose({ svgEl, fit });
         <button :class="{ on: app.showGraph }" title="Показывать граф: ярко — разрешено сейчас, тускло — запрещено" @click="app.showGraph = !app.showGraph">⋔</button>
       </template>
       <button :class="{ on: app.conflictMode !== 'off', half: app.conflictMode === 'current' }" :title="conflictTitle" @click="cycleConflicts">{{ app.conflictMode === 'current' ? '◎' : '✕' }}</button>
+      <button v-if="live" :class="{ on: app.showTimers }" title="Таймеры светофоров" @click="app.showTimers = !app.showTimers">◷</button>
       <button v-if="cfg.basemap" :class="{ on: app.showBasemap }" title="Подложка OpenStreetMap" @click="app.showBasemap = !app.showBasemap">🗺</button>
       <button :class="{ on: helpOpen }" title="Что означают значки" aria-label="Что означают значки" @click="helpOpen = !helpOpen">?</button>
     </div>
     <div v-if="helpOpen" class="map-help" role="dialog" aria-label="Значки карты" @click="helpOpen = false">
       <table>
-        <tr><td>＋ －</td><td>приблизить и отдалить, также колесом мыши или двумя пальцами</td></tr>
-        <tr><td>⌖</td><td>показать перекрёсток</td></tr>
-        <tr><td>⤢</td><td>показать всю модель</td></tr>
-        <tr v-if="live"><td>✎</td><td>правка связей полос: потяните от вершины въезда к вершине выезда</td></tr>
-        <tr v-if="live"><td>🚶</td><td>правка пешеходного графа</td></tr>
-        <tr v-if="live"><td>⋔</td><td>показать граф: ярко — разрешено сейчас, тускло — запрещено</td></tr>
-        <tr><td>✕ ◎</td><td>точки конфликтов: все или только возможные при текущих сигналах</td></tr>
-        <tr v-if="cfg.basemap"><td>🗺</td><td>подложка OpenStreetMap</td></tr>
-        <tr><td>╌ ╌</td><td>длинный пунктир — направление только для рейсовых автобусов</td></tr>
-        <tr><td>┄┄</td><td>короткий пунктир — дополнительная траектория направления</td></tr>
-        <tr><td></td><td>Нажмите на машину, светофор или узел, чтобы увидеть его свойства.</td></tr>
+        <tbody>
+          <tr><td>＋ －</td><td>приблизить и отдалить, также колесом мыши или двумя пальцами</td></tr>
+          <tr><td>⌖</td><td>показать перекрёсток</td></tr>
+          <tr><td>⤢</td><td>показать всю модель</td></tr>
+          <tr v-if="live"><td>✎</td><td>правка связей полос: потяните от вершины въезда к вершине выезда</td></tr>
+          <tr v-if="live"><td>🚶</td><td>правка пешеходного графа</td></tr>
+          <tr v-if="live"><td>⋔</td><td>показать граф: ярко — разрешено сейчас, тускло — запрещено</td></tr>
+          <tr><td>✕ ◎</td><td>точки конфликтов: все или только возможные при текущих сигналах</td></tr>
+          <tr v-if="cfg.basemap"><td>🗺</td><td>подложка OpenStreetMap</td></tr>
+          <tr><td>╌ ╌</td><td>длинный пунктир — направление только для рейсовых автобусов</td></tr>
+          <tr><td>┄┄</td><td>короткий пунктир — дополнительная траектория направления</td></tr>
+          <tr><td></td><td>Нажмите на машину, светофор или узел, чтобы увидеть его свойства.</td></tr>
+        </tbody>
       </table>
     </div>
   </div>

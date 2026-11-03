@@ -5,6 +5,7 @@ import { Simulation } from '../src/engine/sim';
 import { cycleLength } from '../src/engine/signals';
 import { runChecks } from '../src/engine/checks';
 import { normalizeModel, serializeModel } from '../src/engine/model';
+import { invalidRunReasons } from '../src/engine/runValidity';
 import type { ModelConfig } from '../src/engine/types';
 
 const horizon = Number(process.argv[2] ?? 900);
@@ -16,6 +17,7 @@ function run(label: string, cfg: ModelConfig) {
   const t0 = performance.now();
   sim.runUntil(120);
   const warm = { counters: structuredClone(sim.st.counters), t: sim.st.t };
+  sim.st.maxQueue = 0;
   sim.runUntil(horizon);
   const ms = performance.now() - t0;
   const s = sim.summary(warm);
@@ -29,6 +31,12 @@ function run(label: string, cfg: ModelConfig) {
   );
   const lc = Object.entries(sim.logCounts).map(([k, n]) => `${k}:${n}`).join(' ');
   console.log('   журнал:', lc);
+  const invalid = invalidRunReasons(sim.st.counters, sim.logCounts['deadlock-manual'] ?? 0, cfg.sim.diagnosticRecovery);
+  if (invalid.length) {
+    console.error(`   ОТКАЗ ${label}: ${invalid.join(', ')}`);
+    process.exitCode = 1;
+  }
+  sim.dispose();
   return checks;
 }
 
@@ -43,7 +51,7 @@ for (const t of TEMPLATES.slice(1)) {
 // круговая проверка формата
 const m = defaultModel('v1');
 const back = normalizeModel(JSON.parse(serializeModel(m)));
-if (JSON.stringify(back) !== JSON.stringify(m)) console.log('ВНИМАНИЕ: модель меняется при сохранении и загрузке');
+if (JSON.stringify(back) !== JSON.stringify(m)) { console.error('ОТКАЗ: модель меняется при сохранении и загрузке'); process.exitCode = 1; }
 else console.log('формат: сохранение и загрузка без потерь');
 
 // загрузка чужого файла: цвета, строки, числа и размеры ограничены

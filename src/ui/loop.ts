@@ -2,7 +2,7 @@
 // плавно интерполирует положение машин между шагами и обновляет статистику.
 
 import { watch } from 'vue';
-import { app, rebuild, refreshStats, simRef } from './store';
+import { app, rebuild, refreshStats, runInteractive, simRef, toast } from './store';
 
 type RenderFn = (alpha: number) => void;
 const renderers = new Set<RenderFn>();
@@ -28,6 +28,8 @@ let simAtLastSlow = 0;
 let realAtLastSlow = 0;
 let alpha = 1;
 let forceRender = true;
+let frameRequest = false;
+let lastDetails = 0;
 
 export function requestRender() {
   forceRender = true;
@@ -41,8 +43,6 @@ export function syncTarget() {
   forceRender = true;
 }
 
-/** Время на расчёт модели в одном кадре, мс. На медленных устройствах уменьшается само */
-let frameBudget = 9;
 /** Сглаженное время работы кадра: расчёт и отрисовка, мс */
 let workEma = 0;
 let slowDevice = false;
@@ -51,8 +51,8 @@ let frameNo = 0;
 /** Подстройка под устройство: если кадр стабильно дольше 20 мс, считаем меньше и рисуем через кадр */
 function adapt(work: number) {
   workEma = workEma ? workEma * 0.95 + work * 0.05 : work;
-  if (!slowDevice && workEma > 20) { slowDevice = true; frameBudget = 5; }
-  else if (slowDevice && workEma < 8) { slowDevice = false; frameBudget = 9; }
+  if (!slowDevice && workEma > 20) { slowDevice = true; }
+  else if (slowDevice && workEma < 8) { slowDevice = false; }
 }
 
 function frame(now: number) {
@@ -65,26 +65,26 @@ function frame(now: number) {
   last = now;
   let advanced = false;
   if (app.playing) {
-    if (app.speedMode === 'seconds') {
-      target += dtReal * app.speed;
-      const ok = sim.runUntil(target, frameBudget);
-      if (!ok) {
-        // не успеваем — сбрасываем отставание, чтобы вкладка не «залипала»
-        app.stats.lag = true;
-        target = sim.st.t;
-      } else app.stats.lag = false;
-      alpha = Math.max(0, Math.min(1, 1 - (sim.st.t - target) / sim.dt));
-    } else {
-      stepAcc += dtReal * app.speed;
-      const t0 = performance.now();
-      while (stepAcc >= 1 && performance.now() - t0 < frameBudget * 3) {
-        sim.runToNextLampChange();
-        stepAcc -= 1;
-      }
-      if (stepAcc > 3) stepAcc = 0;
-      target = sim.st.t;
-      alpha = 1;
+    if (target < sim.st.t - sim.dt - 1e-6) target = sim.st.t;
+    if (app.speedMode === 'seconds') target = Math.min(target + dtReal * app.speed, sim.st.t + Math.max(1, app.speed * .2));
+    else stepAcc += dtReal * app.speed;
+    if (!frameRequest && (app.speedMode === 'seconds' || stepAcc >= 1)) {
+      frameRequest = true;
+      const version = app.version;
+      const seconds = app.speedMode === 'seconds';
+      const details = now - lastDetails >= 1000;
+      if (details) lastDetails = now;
+      void runInteractive(seconds ? { type: 'advance', target: Math.max(target, sim.st.t) } : { type: 'nextPhase' }, details)
+        .then(complete => {
+          if (version !== app.version) return;
+          if (!seconds && complete) stepAcc = Math.max(0, Math.min(3, stepAcc - 1));
+          forceRender = true;
+        })
+        .catch(error => { if (version === app.version) { app.playing = false; toast(String(error)); } })
+        .finally(() => { frameRequest = false; });
     }
+    app.stats.lag = target - sim.st.t > Math.max(1, app.speed * .2);
+    alpha = app.speedMode === 'seconds' ? Math.max(0, Math.min(1, 1 - (sim.st.t - target) / sim.dt)) : 1;
     advanced = true;
   }
   // карта рисуется, только когда видна вкладка симуляции, на медленном устройстве — через кадр
@@ -132,26 +132,45 @@ export function pause() {
   syncTarget();
 }
 
+type Command = Parameters<typeof runInteractive>[0];
+let controls: Promise<void> = Promise.resolve();
+let pendingControls = 0;
+function enqueueControl(makeCommand: () => Command) {
+  pause();
+  if (pendingControls >= 8) { toast('Дождитесь завершения перемотки.'); return; }
+  const version = app.version;
+  pendingControls++;
+  controls = controls.then(async () => {
+    if (version !== app.version) return;
+    await runInteractive({ type: 'snapshot' });
+    if (version === app.version) await control(makeCommand());
+  }).catch(error => { toast(String(error)); }).finally(() => { pendingControls--; });
+}
+
+async function control(command: Command) {
+  pause();
+  const version = app.version;
+  try {
+    let complete: boolean;
+    do {
+      complete = await runInteractive(command, true);
+      if (version !== app.version) return;
+    } while (!complete && (command.type === 'advance' || command.type === 'nextPhase'));
+    syncTarget();
+    refreshStats();
+    for (const h of slowHooks) h();
+    app.logTick++;
+  } catch (error) { toast(String(error)); }
+}
+
 export function stepSeconds(sec: number) {
   const sim = simRef.value;
   if (!sim) return;
-  if (sec > 0) sim.runUntil(sim.st.t + sec);
-  else sim.back(-sec);
-  syncTarget();
-  refreshStats();
-  for (const h of slowHooks) h();
-  app.logTick++;
+  enqueueControl(() => sec > 0 ? { type: 'advance', target: (simRef.value?.st.t ?? 0) + sec } : { type: 'back', seconds: -sec });
 }
 
 export function stepPhase(dir: 1 | -1) {
-  const sim = simRef.value;
-  if (!sim) return;
-  if (dir > 0) sim.runToNextLampChange();
-  else sim.backToPrevLampChange();
-  syncTarget();
-  refreshStats();
-  for (const h of slowHooks) h();
-  app.logTick++;
+  enqueueControl(() => ({ type: dir > 0 ? 'nextPhase' : 'previousPhase' }));
 }
 
 export function restart() {

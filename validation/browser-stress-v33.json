@@ -1,0 +1,43 @@
+{
+  "done": true,
+  "engineVersion": "2.1-dev.33",
+  "preset": "v1",
+  "seed": 42,
+  "vehicleRatePerArm": 10000,
+  "pedestrianRatePerSource": 20000,
+  "durationMs": 23913,
+  "modelTime": 900,
+  "calls": 1400,
+  "vehicles": 176,
+  "pedestrianGroups": 600,
+  "externalQueues": {
+    "E": 1500,
+    "N": 1500,
+    "W": 1500,
+    "S": 1500
+  },
+  "droppedVehicles": 3434,
+  "droppedPedestrians": 14897,
+  "raf": {
+    "samples": 1423,
+    "medianMs": 17.05999999999949,
+    "p95Ms": 17.080000000001746,
+    "maxMs": 204.22000000000003
+  },
+  "timer": {
+    "samples": 466,
+    "medianMs": 50,
+    "p95Ms": 55,
+    "maxMs": 219
+  },
+  "workerError": "",
+  "viewport": {
+    "width": 1280,
+    "height": 814
+  },
+  "limitations": "Isolated desktop Firefox dev on shared host. RAF and timer scheduling, not physical display or input latency. Intentional overload, not a valid traffic experiment. Not mobile acceptance.",
+  "matchesNodeCounts": true,
+  "engineHash": "3ba62ef722a4e96739ef5688e9e7119ec08fdbee6664a651e0596d4074d0f470",
+  "probeSha256": "62b0a117fdf6dd0381059687411580242fee1c44554c1ae10ee36f11a5cab340",
+  "procedure": "Fresh dev navigation; mounted store identity checked in page module context; default v1/42; bounded Worker advances to 900 seconds with state acceptance and map updates; 50 ms timer and requestAnimationFrame observed; original model restored in finally. Includes model rebuild. No physical input or display measurement."
+}

@@ -70,11 +70,11 @@ function migrateV1(raw: Raw): Raw {
   const order = ['E', 'N', 'W', 'S'].filter((d) => armsRaw[d]);
   const arms = order.map((d, i) => fixArm({ ...armsRaw[d], id: d }, i));
   const isKolpino = order.join('') === 'ENWS' && armsRaw.W?.medianWidth !== undefined;
-  const peds: PedConfig = isKolpino ? structuredClone(KOLPINO_PEDS) : genPedGraph(arms);
+  const peds: PedConfig = isObj(raw.peds) ? structuredClone(raw.peds) as unknown as PedConfig : isKolpino ? structuredClone(KOLPINO_PEDS) : genPedGraph(arms);
   const sim = { ...(raw.sim as Raw) };
   const oldPed = sim.pedestrians as { rate?: number; speedMin?: number; speedMax?: number } | undefined;
   delete sim.pedestrians;
-  if (oldPed) {
+  if (oldPed && !isObj(raw.peds)) {
     const total = peds.sources.reduce((a, s) => a + s.rate, 0) || 1;
     for (const s of peds.sources) {
       if (typeof oldPed.rate === 'number') s.rate = Math.round((s.rate / total) * oldPed.rate);
@@ -87,7 +87,7 @@ function migrateV1(raw: Raw): Raw {
   for (const g of (signals.groups as SignalGroup[]) ?? []) {
     if (g.kind === 'pedestrian' && (!g.movements || g.movements.length === 0)) g.movements = pedEdgesAcross(tmp, g.arm);
   }
-  return { ...raw, format: 'crossroad-model', version: 2, description: raw.description ?? '', arms, peds, signals, sim, transit: isKolpino ? KOLPINO_TRANSIT() : TRANSIT_EMPTY() };
+  return { ...raw, format: 'crossroad-model', version: 2, description: raw.description ?? '', arms, peds, signals, sim, transit: isObj(raw.transit) ? structuredClone(raw.transit) : isKolpino ? KOLPINO_TRANSIT() : TRANSIT_EMPTY() };
 }
 
 /** Проверка и нормализация модели из JSON. Бросает ModelFormatError, если файл не похож на модель. */
@@ -240,6 +240,7 @@ function normalizeSim(raw: unknown): ModelConfig['sim'] {
     out[k] = clampNum(r[k], SIM_DEFAULT[k] as number, range[0], range[1]);
   }
   sim.seed = Math.round(sim.seed);
+  sim.diagnosticRecovery = r.diagnosticRecovery === true;
   sim.crashPersist = typeof r.crashPersist === 'boolean' ? r.crashPersist : SIM_DEFAULT.crashPersist;
   sim.missedTurn = r.missedTurn === 'wait' ? 'wait' : 'reroute';
   sim.pathSpread = typeof r.pathSpread === 'boolean' ? r.pathSpread : SIM_DEFAULT.pathSpread;

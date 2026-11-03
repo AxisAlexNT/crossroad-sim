@@ -202,32 +202,36 @@ const counts = computed(() => ({
         </div>
         <div class="table-scroll">
           <table class="tbl arm-table">
-            <tr>
-              <th>id</th><th>Название</th><th>Сторона</th><th>Угол, °</th><th>Полос к / от</th><th>Ширина полосы</th><th>Разделитель</th>
-              <th>Переход от центра</th><th>Переход</th><th>Островок</th><th>км/ч</th><th>Подход / выезд, м</th><th>Цвет</th><th />
-            </tr>
-            <tr v-for="a in editor.cfg.arms" :key="a.id">
-              <td><b>{{ a.id }}</b></td>
-              <td><input v-model="a.name" /></td>
-              <td><input v-model="a.short" class="narrow" :placeholder="sideName(a.angle)" /></td>
-              <td><input v-model.number="a.angle" type="number" step="1" class="narrow" /></td>
-              <td class="row gap">
-                <input :value="a.inLanes" type="number" min="0" max="8" class="narrow" @change="a.inLanes = Math.max(0, Math.min(8, Math.round(+($event.target as HTMLInputElement).value))); reconcile(editor.cfg)" />
-                <input :value="a.outLanes" type="number" min="0" max="8" class="narrow" @change="a.outLanes = Math.max(0, Math.min(8, Math.round(+($event.target as HTMLInputElement).value))); reconcile(editor.cfg)" />
-              </td>
-              <td><input v-model.number="a.laneWidth" type="number" min="2.5" max="6" step="0.05" class="narrow" /></td>
-              <td><input v-model.number="a.medianWidth" type="number" min="0" max="20" step="0.5" class="narrow" /></td>
-              <td><input v-model.number="a.crosswalkOffset" type="number" min="5" max="80" step="0.5" class="narrow" /></td>
-              <td><input v-model="a.hasCrosswalk" type="checkbox" /></td>
-              <td><input v-model="a.refuge" type="checkbox" /></td>
-              <td><input v-model.number="a.speedLimit" type="number" min="10" max="110" step="5" class="narrow" /></td>
-              <td class="row gap">
-                <input v-model.number="a.approachLength" type="number" min="30" step="5" class="narrow" />
-                <input v-model.number="a.exitLength" type="number" min="20" step="5" class="narrow" />
-              </td>
-              <td><input v-model="a.color" type="color" /></td>
-              <td><button class="btn tiny danger" title="Удалить подход" @click="deleteArm(a.id)">✕</button></td>
-            </tr>
+            <thead>
+              <tr>
+                <th>id</th><th>Название</th><th>Сторона</th><th>Угол, °</th><th>Полос к / от</th><th>Ширина полосы</th><th>Разделитель</th>
+                <th>Переход от центра</th><th>Переход</th><th>Островок</th><th>км/ч</th><th>Подход / выезд, м</th><th>Цвет</th><th />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="a in editor.cfg.arms" :key="a.id">
+                <td><b>{{ a.id }}</b></td>
+                <td><input v-model="a.name" /></td>
+                <td><input v-model="a.short" class="narrow" :placeholder="sideName(a.angle)" /></td>
+                <td><input v-model.number="a.angle" type="number" step="1" class="narrow" /></td>
+                <td class="row gap">
+                  <input :value="a.inLanes" type="number" min="0" max="8" class="narrow" @change="a.inLanes = Math.max(0, Math.min(8, Math.round(+($event.target as HTMLInputElement).value))); reconcile(editor.cfg)" />
+                  <input :value="a.outLanes" type="number" min="0" max="8" class="narrow" @change="a.outLanes = Math.max(0, Math.min(8, Math.round(+($event.target as HTMLInputElement).value))); reconcile(editor.cfg)" />
+                </td>
+                <td><input v-model.number="a.laneWidth" type="number" min="2.5" max="6" step="0.05" class="narrow" /></td>
+                <td><input v-model.number="a.medianWidth" type="number" min="0" max="20" step="0.5" class="narrow" /></td>
+                <td><input v-model.number="a.crosswalkOffset" type="number" min="5" max="80" step="0.5" class="narrow" /></td>
+                <td><input v-model="a.hasCrosswalk" type="checkbox" /></td>
+                <td><input v-model="a.refuge" type="checkbox" /></td>
+                <td><input v-model.number="a.speedLimit" type="number" min="10" max="110" step="5" class="narrow" /></td>
+                <td class="row gap">
+                  <input v-model.number="a.approachLength" type="number" min="30" step="5" class="narrow" />
+                  <input v-model.number="a.exitLength" type="number" min="20" step="5" class="narrow" />
+                </td>
+                <td><input v-model="a.color" type="color" /></td>
+                <td><button class="btn tiny danger" title="Удалить подход" @click="deleteArm(a.id)">✕</button></td>
+              </tr>
+            </tbody>
           </table>
         </div>
         <div class="small muted">Угол — направление дороги от центра наружу: 0° — восток, 90° — север, 180° — запад, 270° — юг. Полосы нумеруются от оси дороги к бордюру, начиная с нуля. Остальные параметры подхода — на панели «Элемент» после нажатия на подход на карте.</div>

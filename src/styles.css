@@ -78,7 +78,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 body {
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 14px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
@@ -242,7 +242,7 @@ svg.map .head[data-lamp='Y'] .lamp-y, svg.map .head[data-lamp='RY'] .lamp-y { fi
 svg.map .head[data-lamp='G'] .lamp-g { fill: #2fe07a; }
 svg.map .head[data-lamp='G'] .lamp-arrow { fill: #2fe07a; }
 svg.map .head.pedestrian[data-lamp='G'] .lamp-pg { fill: #2fe07a; }
-svg.map .head.pedestrian[data-lamp='R'] .lamp-pr, svg.map .head.pedestrian[data-lamp='OFF'] .lamp-pr, svg.map .head.pedestrian[data-lamp='Y'] .lamp-pr, svg.map .head.pedestrian[data-lamp='RY'] .lamp-pr { fill: #ff3b3b; }
+svg.map .head.pedestrian[data-lamp='R'] .lamp-pr, svg.map .head.pedestrian[data-lamp='Y'] .lamp-pr, svg.map .head.pedestrian[data-lamp='RY'] .lamp-pr { fill: #ff3b3b; }
 svg.map .nodes .node { cursor: pointer; opacity: 0.55; }
 svg.map .nodes.edit .node { opacity: 1; }
 svg.map .node circle { stroke-width: 0.3; }

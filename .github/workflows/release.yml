@@ -19,8 +19,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run test:engine
+      - name: Полная регрессия перед выпуском
+        run: npm test
       - run: npm run build
       - run: npm run check:dist
       - name: Имя файла с версией

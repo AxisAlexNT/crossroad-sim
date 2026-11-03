@@ -114,10 +114,14 @@ const armShort = (id: string) => editor.cfg.arms.find((a) => a.id === id)?.short
               </div>
             </div>
             <table class="tbl">
-              <tr><th>Название</th><th>Где</th><th>м</th><th>Карман</th></tr>
-              <tr v-for="s in tr.stops" :key="s.id" class="clickable" @click="editor.selected = { kind: 'stop', id: s.id }">
-                <td>{{ s.name }}</td><td>{{ armShort(s.arm) }}, {{ s.side === 'approach' ? 'перед' : 'за' }}</td><td>{{ s.dist }}</td><td>{{ s.bay ? 'да' : 'нет' }}</td>
-              </tr>
+              <thead>
+                <tr><th>Название</th><th>Где</th><th>м</th><th>Карман</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in tr.stops" :key="s.id" class="clickable" @click="editor.selected = { kind: 'stop', id: s.id }">
+                  <td>{{ s.name }}</td><td>{{ armShort(s.arm) }}, {{ s.side === 'approach' ? 'перед' : 'за' }}</td><td>{{ s.dist }}</td><td>{{ s.bay ? 'да' : 'нет' }}</td>
+                </tr>
+              </tbody>
             </table>
           </section>
           <section>
@@ -126,11 +130,15 @@ const armShort = (id: string) => editor.cfg.arms.find((a) => a.id === id)?.short
               <button class="btn small" @click="addRoute">+ маршрут</button>
             </div>
             <table class="tbl">
-              <tr><th>Маршрут</th><th>Откуда — куда</th><th>в час</th><th>Интервал</th><th /></tr>
-              <tr v-for="r in tr.routes" :key="r.id" class="clickable" :class="{ off: !r.enabled }" @click="editor.selected = { kind: 'route', id: r.id }">
-                <td>{{ r.name }}</td><td>{{ armShort(r.from) }} — {{ armShort(r.to) }}</td><td>{{ r.perHour }}</td><td>{{ r.headway ?? '' }}</td>
-                <td><input v-model="r.enabled" type="checkbox" title="Маршрут работает" @click.stop /></td>
-              </tr>
+              <thead>
+                <tr><th>Маршрут</th><th>Откуда — куда</th><th>в час</th><th>Интервал</th><th /></tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in tr.routes" :key="r.id" class="clickable" :class="{ off: !r.enabled }" @click="editor.selected = { kind: 'route', id: r.id }">
+                  <td>{{ r.name }}</td><td>{{ armShort(r.from) }} — {{ armShort(r.to) }}</td><td>{{ r.perHour }}</td><td>{{ r.headway ?? '' }}</td>
+                  <td><input v-model="r.enabled" type="checkbox" title="Маршрут работает" @click.stop /></td>
+                </tr>
+              </tbody>
             </table>
             <div class="small muted">Число автобусов в час по каждому маршруту оценено по интервалам из расписаний, середина диапазона. Перед выводами его стоит сверить с данными перевозчика.</div>
           </section>

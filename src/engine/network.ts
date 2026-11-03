@@ -4,7 +4,7 @@
 import type { ArmConfig, ArmId, Connection, ConnVariant, ModelConfig, PedNode, TurnKind } from './types';
 import {
   add, cubic, dist, makePolyline, mul, pointAt, polylineIntersections, right, sub, v,
-  type Polyline, type V2,
+  type Polyline, type V2, type OBB, obbOverlap,
 } from './geometry';
 
 const DEG = Math.PI / 180;
@@ -84,6 +84,8 @@ export interface Conflict {
   kind: 'cross' | 'merge';
   /** между траекториями из одной полосы: проезжают по очереди въезда */
   same?: boolean;
+  /** Дополнительная зона пересечения габаритов, уточняется для конкретных машин. */
+  body?: boolean;
 }
 
 export interface ConflictRef {
@@ -319,6 +321,29 @@ function closestApproach(a: Polyline, b: Polyline): { d: number; sa: number; sb:
 /** Ширина, при которой габариты машин на соседних траекториях задевают друг друга, м */
 const W_ZONE = 2.5;
 
+/** Радиус коридора кузова, построенного по той же хорде 15–85 %, что и в симуляции.
+ * Проверяем углы кузова вдоль пути: одной ширины недостаточно на повороте.
+ * Продолжения пути исключают ложное увеличение радиуса у стоп-линии и выезда.
+ */
+export function sweptBodyRadius(path: Polyline, length: number, width: number): number {
+  const first = pointAt(path, 0), last = pointAt(path, path.length);
+  const at = (s: number) => s < 0
+    ? { x: first.p.x + Math.cos(first.h) * s, y: first.p.y + Math.sin(first.h) * s }
+    : pointAt(path, s).p;
+  const extended = makePolyline([at(-length * 2), ...path.pts,
+    { x: last.p.x + Math.cos(last.h) * length * 2, y: last.p.y + Math.sin(last.h) * length * 2 }]);
+  let radius = width / 2;
+  for (let front = 0; front <= path.length + length; front += 0.5) {
+    const f = at(front - length * 0.15), r = at(front - length * 0.85);
+    const h = Math.atan2(f.y - r.y, f.x - r.x), ux = Math.cos(h), uy = Math.sin(h);
+    const cx = (f.x + r.x) / 2, cy = (f.y + r.y) / 2;
+    for (const longitudinal of [-length / 2, length / 2]) for (const lateral of [-width / 2, width / 2]) {
+      radius = Math.max(radius, distToPolyline({ x: cx + ux * longitudinal - uy * lateral, y: cy + uy * longitudinal + ux * lateral }, extended));
+    }
+  }
+  return radius;
+}
+
 /** Участок траектории a вокруг точки s, где она ближе thr к траектории b */
 function zoneAround(a: Polyline, s: number, b: Polyline, thr: number): [number, number] {
   const step = 0.5;
@@ -445,6 +470,11 @@ function polylineHits(line: Polyline, outline: V2[]): number[] {
   return polylineIntersections(line, ring).map((x) => x.sa).sort((a, b) => a - b);
 }
 
+type BodyContact = { a0: number; a1: number; b0: number; b1: number };
+// Один набор геометрии на процесс: смена модели освобождает предыдущий кэш.
+// Фазы и зёрна не меняют кузовные коридоры, поэтому их не включаем в ключ.
+let bodyGeometryCache: { key: string; radii: number[]; contacts: Map<string, BodyContact | null> } | undefined;
+
 export function buildNetwork(cfg: ModelConfig): Network {
   const arms: Record<ArmId, ArmGeom> = {};
   for (const a of cfg.arms) arms[a.id] = buildArm(a);
@@ -497,12 +527,68 @@ export function buildNetwork(cfg: ModelConfig): Network {
     }
   }
 
+  const bodySamples = new Map<number, Array<{ s: number; box: OBB; radius: number }>>();
+  const shapesFor = (c: ConnGeom) => {
+    const types = cfg.spawners?.[c.conn.from.arm]?.params.types ?? [];
+    const shapes = types.filter(t => t.share > 0).flatMap(t => [t.lengthMin, t.lengthMax].map(length => ({ length, width: t.kind === 'bus' ? 2.55 : t.kind === 'truck' ? 2.5 : t.kind === 'van' ? 2 : 1.8 })));
+    if (cfg.transit?.enabled) for (const route of cfg.transit.routes) if (route.enabled && route.from === c.conn.from.arm) shapes.push({ length: route.length, width: 2.55 });
+    return shapes.filter(s => s.length > 0 && Number.isFinite(s.length));
+  };
+  const shapesByConn = conns.map(shapesFor);
+  const geometryKey = JSON.stringify(conns.map((c, i) => [c.path.pts, shapesByConn[i], c.variant,
+    arms[c.conn.from.arm].cfg.laneWidth, cfg.sim?.pathSpread, cfg.sim?.implicitShift, cfg.sim?.implicitBend]));
+  if (bodyGeometryCache?.key !== geometryKey) bodyGeometryCache = { key: geometryKey, radii: [], contacts: new Map() };
+  const bodyCache = bodyGeometryCache;
+  const samplesFor = (index: number) => {
+    const cached = bodySamples.get(index); if (cached) return cached;
+    const c = conns[index], first = pointAt(c.path, 0);
+    const at = (s: number) => s < 0 ? { x: first.p.x + Math.cos(first.h) * s, y: first.p.y + Math.sin(first.h) * s } : pointAt(c.path, s).p;
+    const samples: Array<{ s: number; box: OBB; radius: number }> = [];
+    const seen = new Set<string>();
+    for (const shape of shapesByConn[index]) {
+      const key = `${shape.length}:${shape.width}`; if (seen.has(key)) continue; seen.add(key);
+      const spread = cfg.sim.pathSpread && c.variant === 0 ? Math.min(Math.max(0, cfg.sim.implicitShift) + Math.max(0, cfg.sim.implicitBend), Math.max(0, (arms[c.conn.from.arm].cfg.laneWidth - shape.width) / 2) * 0.6) : 0;
+      for (let s = 0; s <= c.path.length + shape.length; s += 1) {
+        const f = at(s - shape.length * .15), r = at(s - shape.length * .85);
+        const box = { cx: (f.x + r.x) / 2, cy: (f.y + r.y) / 2, h: Math.atan2(f.y - r.y, f.x - r.x), hl: shape.length / 2 + .5, hw: shape.width / 2 + spread + .1 };
+        samples.push({ s, box, radius: Math.hypot(box.hl, box.hw) });
+      }
+    }
+    bodySamples.set(index, samples); return samples;
+  };
+  const bodyContact = (a: number, b: number) => {
+    const key = `${a}:${b}`;
+    if (bodyCache.contacts.has(key)) return bodyCache.contacts.get(key)!;
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const x of samplesFor(a)) for (const y of samplesFor(b)) {
+      const reach = x.radius + y.radius;
+      if (Math.abs(x.box.cx - y.box.cx) > reach || Math.abs(x.box.cy - y.box.cy) > reach) continue;
+      if (!obbOverlap(x.box, y.box)) continue;
+      a0 = Math.min(a0, x.s); a1 = Math.max(a1, x.s); b0 = Math.min(b0, y.s); b1 = Math.max(b1, y.s);
+    }
+    const result = Number.isFinite(a0) ? { a0, a1, b0, b1 } : null;
+    if (bodyCache.contacts.size >= 4096) bodyCache.contacts.delete(bodyCache.contacts.keys().next().value!);
+    bodyCache.contacts.set(key, result);
+    return result;
+  };
+  const bodyRadii = bodyCache.radii.length ? bodyCache.radii : conns.map((c, i) => {
+    const shapes = shapesByConn[i];
+    let radius = W_ZONE / 2;
+    for (const shape of shapes) if (shape.length > 0 && Number.isFinite(shape.length)) {
+      const spread = cfg.sim.pathSpread && c.variant === 0
+        ? Math.min(Math.max(0, cfg.sim.implicitShift) + Math.max(0, cfg.sim.implicitBend), Math.max(0, (arms[c.conn.from.arm].cfg.laneWidth - shape.width) / 2) * 0.6) : 0;
+      radius = Math.max(radius, sweptBodyRadius(c.path, shape.length, shape.width) + spread);
+    }
+    return radius;
+  });
+  bodyCache.radii = bodyRadii;
+
   const conflicts: Conflict[] = [];
   const W = 2.2;
   /** траектории дальше этого друг от друга по оси — машины едут рядом, а не одна за другой */
-  const ROW_GAP = 2.25;
+  const ROW_GAP = 2.75;
   /** ближе этого рядом не помещаются машина и грузовик или автобус */
-  const ROW_NEAR = 2.5;
+  const ROW_NEAR = 3.1;
   for (let i = 0; i < conns.length; i++) {
     for (let j = i + 1; j < conns.length; j++) {
       const A = conns[i], B = conns[j];
@@ -533,21 +619,26 @@ export function buildNetwork(cfg: ModelConfig): Network {
       if (sameTo && A.conn.id === B.conn.id) continue;
       if (sameTo) {
         // на широком выезде два потока идут рядом и сливаются, только когда между ними не остаётся места
-        const toCfg = arms[A.conn.to.arm].cfg;
-        const thr = toCfg.twoRows !== false && toCfg.laneWidth >= TWO_ROW_WIDTH ? 2.1 : W * 1.25;
+        // Широкая полоса не уменьшает габариты транспорта. Зона должна начинаться
+        // до соприкосновения кузовов, включая автобус и запас проверки столкновений.
+        // Ширина и разброс должны относиться к одному типу кузова.
+        // Сочетание ширины автобуса с максимальным разбросом легковой машины
+        // занимало обе раздельные полосы уже на входе и задерживало слияние.
+        const thr = Math.max(W * 1.25, bodyRadii[i] + bodyRadii[j] + 0.15);
         const aStart = mergeStart(A.path, B.path, thr);
         const bStart = mergeStart(B.path, A.path, thr);
         conflicts.push({ id: conflicts.length, a: i, b: j, aStart: Math.max(0, aStart - 1), aEnd: A.path.length, bStart: Math.max(0, bStart - 1), bEnd: B.path.length, p: A.path.pts[A.path.pts.length - 1], kind: 'merge' });
         continue;
       }
+      const zoneWidth = W_ZONE;
       const xs = polylineIntersections(A.path, B.path);
       if (xs.length > 0) {
         for (const x of xs) {
           const ha = Math.abs(Math.sin(angleAt(A.path, x.sa) - angleAt(B.path, x.sb)));
           const half = Math.min(7, W / Math.max(0.3, ha) / 2 + 1.2);
           // зона — где траектории ближе ширины машины; при остром угле она длиннее
-          const [a0, a1] = zoneAround(A.path, x.sa, B.path, W_ZONE);
-          const [b0, b1] = zoneAround(B.path, x.sb, A.path, W_ZONE);
+          const [a0, a1] = zoneAround(A.path, x.sa, B.path, zoneWidth);
+          const [b0, b1] = zoneAround(B.path, x.sb, A.path, zoneWidth);
           conflicts.push({
             id: conflicts.length, a: i, b: j,
             aStart: Math.max(0, Math.min(x.sa - half, a0 - 0.6)), aEnd: Math.min(A.path.length, Math.max(x.sa + half, a1 + 0.6)),
@@ -557,14 +648,41 @@ export function buildNetwork(cfg: ModelConfig): Network {
         }
       } else {
         const ca = closestApproach(A.path, B.path);
-        if (ca.d < W_ZONE) {
-          const [a0, a1] = zoneAround(A.path, ca.sa, B.path, W_ZONE);
-          const [b0, b1] = zoneAround(B.path, ca.sb, A.path, W_ZONE);
+        if (ca.d < zoneWidth) {
+          const [a0, a1] = zoneAround(A.path, ca.sa, B.path, zoneWidth);
+          const [b0, b1] = zoneAround(B.path, ca.sb, A.path, zoneWidth);
           conflicts.push({ id: conflicts.length, a: i, b: j, aStart: Math.max(0, Math.min(ca.sa - 3, a0 - 0.6)), aEnd: Math.min(A.path.length, Math.max(ca.sa + 3, a1 + 0.6)), bStart: Math.max(0, Math.min(ca.sb - 3, b0 - 0.6)), bEnd: Math.min(B.path.length, Math.max(ca.sb + 3, b1 + 0.6)), p: pointAt(A.path, ca.sa).p, kind: 'cross' });
+        } else if (ca.d < bodyRadii[i] + bodyRadii[j] + 0.15) {
+          const contact = bodyContact(i, j);
+          if (contact) conflicts.push({ id: conflicts.length, a: i, b: j,
+            aStart: Math.max(0, contact.a0 - 1), aEnd: Math.min(A.path.length, contact.a1),
+            bStart: Math.max(0, contact.b0 - 1), bEnd: Math.min(B.path.length, contact.b1),
+            p: pointAt(A.path, (contact.a0 + contact.a1) / 2).p, kind: 'cross', body: true });
         }
       }
     }
   }
+  // Перекрывающиеся зоны одной пары траекторий резервируются атомарно.
+  // Иначе участники могут получить разные части одного коридора и ждать друг друга.
+  const zones = new Map<string, Conflict[]>();
+  for (const source of conflicts) {
+    const key = `${source.a}:${source.b}:${source.kind}:${!!source.same}`;
+    const group = zones.get(key) ?? [];
+    const zone = { ...source };
+    for (let i = 0; i < group.length;) {
+      const other = group[i];
+      if (zone.aStart <= other.aEnd && other.aStart <= zone.aEnd && zone.bStart <= other.bEnd && other.bStart <= zone.bEnd) {
+        zone.aStart = Math.min(zone.aStart, other.aStart); zone.aEnd = Math.max(zone.aEnd, other.aEnd);
+        zone.bStart = Math.min(zone.bStart, other.bStart); zone.bEnd = Math.max(zone.bEnd, other.bEnd);
+        group.splice(i, 1);
+        i = 0;
+      } else i++;
+    }
+    group.push(zone);
+    zones.set(key, group);
+  }
+  conflicts.length = 0;
+  for (const group of zones.values()) for (const zone of group) conflicts.push({ ...zone, id: conflicts.length });
   for (const A of conns) {
     for (const B of conns) {
       if (A === B || A.conn.from.arm !== B.conn.from.arm || A.conn.from.lane !== B.conn.from.lane) continue;

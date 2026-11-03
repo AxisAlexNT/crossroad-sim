@@ -315,13 +315,17 @@ function setWeight(dest: ArmId, lane: number, v: number) {
         <label class="check"><input type="checkbox" :checked="!!spawner.params.drivers" @change="toggleSpawnDrivers(($event.target as HTMLInputElement).checked)" /> Свои параметры водителей</label>
         <div v-if="spawner.params.drivers" class="table-scroll">
           <table class="tbl">
-            <tr><th>Параметр</th><th>от</th><th>до</th><th>распределение</th></tr>
-            <tr v-for="[k, label, step] in DRIVER_ROWS" :key="k">
-              <td>{{ label }}</td>
-              <td><input v-model.number="spawner.params.drivers[k].min" type="number" :step="step" min="0" style="width: 64px" /></td>
-              <td><input v-model.number="spawner.params.drivers[k].max" type="number" :step="step" min="0" style="width: 64px" /></td>
-              <td><select v-model="spawner.params.drivers[k].dist"><option value="uniform">равномерное</option><option value="normal">нормальное</option><option value="triangular">треугольное</option></select></td>
-            </tr>
+            <thead>
+              <tr><th>Параметр</th><th>от</th><th>до</th><th>распределение</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="[k, label, step] in DRIVER_ROWS" :key="k">
+                <td>{{ label }}</td>
+                <td><input v-model.number="spawner.params.drivers[k].min" type="number" :step="step" min="0" style="width: 64px" /></td>
+                <td><input v-model.number="spawner.params.drivers[k].max" type="number" :step="step" min="0" style="width: 64px" /></td>
+                <td><select v-model="spawner.params.drivers[k].dist"><option value="uniform">равномерное</option><option value="normal">нормальное</option><option value="triangular">треугольное</option></select></td>
+              </tr>
+            </tbody>
           </table>
         </div>
         <div class="small muted">Каждая новая машина получает значения из этих диапазонов. Нормальное распределение — среднее посередине, диапазон ±3σ. Грузовые и автобусы разгоняются с общим ускорением тяжёлых машин из настроек.</div>
@@ -344,13 +348,17 @@ function setWeight(dest: ArmId, lane: number, v: number) {
       <div class="small muted">Сумма {{ destTotal.toFixed(2) }}, доли нормируются автоматически.</div>
       <h4>Типы машин</h4>
       <table class="tbl">
-        <tr><th>Тип</th><th>Доля</th><th>Длина, м</th><th /></tr>
-        <tr v-for="(t, i) in spawner.params.types" :key="i">
-          <td><select v-model="t.kind"><option v-for="(l, k) in VK" :key="k" :value="k">{{ l }}</option></select></td>
-          <td><input v-model.number="t.share" type="number" min="0" max="1" step="0.01" /></td>
-          <td class="row gap"><input v-model.number="t.lengthMin" type="number" min="2" step="0.1" />–<input v-model.number="t.lengthMax" type="number" min="2" step="0.1" /></td>
-          <td><button class="btn small" @click="spawner.params.types.splice(i, 1)">✕</button></td>
-        </tr>
+        <thead>
+          <tr><th>Тип</th><th>Доля</th><th>Длина, м</th><th /></tr>
+        </thead>
+        <tbody>
+          <tr v-for="(t, i) in spawner.params.types" :key="i">
+            <td><select v-model="t.kind"><option v-for="(l, k) in VK" :key="k" :value="k">{{ l }}</option></select></td>
+            <td><input v-model.number="t.share" type="number" min="0" max="1" step="0.01" /></td>
+            <td class="row gap"><input v-model.number="t.lengthMin" type="number" min="2" step="0.1" />–<input v-model.number="t.lengthMax" type="number" min="2" step="0.1" /></td>
+            <td><button class="btn small" @click="spawner.params.types.splice(i, 1)">✕</button></td>
+          </tr>
+        </tbody>
       </table>
       <button class="btn small" @click="addType">+ тип</button>
       <NodeCode :code="spawner.code" :manual="spawner.manual" fn-name="spawn" :test="testSpawn" @apply="applyCode('spawner', $event)" @regen="regenNode('spawner', arm!, true, cfg)" />
@@ -372,13 +380,17 @@ function setWeight(dest: ArmId, lane: number, v: number) {
       <h4>Веса полос для каждого направления</h4>
       <div class="table-scroll">
         <table class="tbl">
-          <tr><th>Куда</th><th v-for="l in armCfg.inLanes" :key="l">полоса {{ l - 1 }}</th></tr>
-          <tr v-for="a in arms" :key="a.id">
-            <td>{{ a.short }}</td>
-            <td v-for="l in armCfg.inLanes" :key="l" :class="{ invalid: (chooser.params.weights[a.id]?.[l - 1] ?? 0) > 0 && !reachable(arm, l - 1).includes(a.id), possible: reachable(arm, l - 1).includes(a.id) }">
-              <input type="number" min="0" step="0.05" :value="chooser.params.weights[a.id]?.[l - 1] ?? 0" @change="setWeight(a.id, l - 1, +($event.target as HTMLInputElement).value)" />
-            </td>
-          </tr>
+          <thead>
+            <tr><th>Куда</th><th v-for="l in armCfg.inLanes" :key="l">полоса {{ l - 1 }}</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in arms" :key="a.id">
+              <td>{{ a.short }}</td>
+              <td v-for="l in armCfg.inLanes" :key="l" :class="{ invalid: (chooser.params.weights[a.id]?.[l - 1] ?? 0) > 0 && !reachable(arm, l - 1).includes(a.id), possible: reachable(arm, l - 1).includes(a.id) }">
+                <input type="number" min="0" step="0.05" :value="chooser.params.weights[a.id]?.[l - 1] ?? 0" @change="setWeight(a.id, l - 1, +($event.target as HTMLInputElement).value)" />
+              </td>
+            </tr>
+          </tbody>
         </table>
       </div>
       <div class="small muted">Зелёные ячейки — из полосы можно проехать в это направление. Красные — вес задан, но проехать нельзя, такие машины будут ошибаться полосой.</div>
@@ -488,12 +500,16 @@ function setWeight(dest: ArmId, lane: number, v: number) {
           <div class="small muted">Сумма {{ pedSum.toFixed(2) }}, веса нормируются. Маршрут строится по графу переходов, кратчайший или близкий к нему.</div>
           <h4>Группы пешеходов, которые переходят дорогу вместе</h4>
           <table class="tbl">
-            <tr><th>Человек</th><th>Доля</th><th /></tr>
-            <tr v-for="(g, i) in pedSource.groups" :key="i">
-              <td><input v-model.number="g.size" type="number" min="1" max="4" step="1" /></td>
-              <td><input v-model.number="g.share" type="number" min="0" max="1" step="0.01" /></td>
-              <td><button class="btn small" @click="pedSource.groups.splice(i, 1)">✕</button></td>
-            </tr>
+            <thead>
+              <tr><th>Человек</th><th>Доля</th><th /></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(g, i) in pedSource.groups" :key="i">
+                <td><input v-model.number="g.size" type="number" min="1" max="4" step="1" /></td>
+                <td><input v-model.number="g.share" type="number" min="0" max="1" step="0.01" /></td>
+                <td><button class="btn small" @click="pedSource.groups.splice(i, 1)">✕</button></td>
+              </tr>
+            </tbody>
           </table>
           <div class="row gap">
             <button class="btn small" @click="pedSource.groups.push({ size: 2, share: 0.1 })">+ размер группы</button>
@@ -625,7 +641,9 @@ function setWeight(dest: ArmId, lane: number, v: number) {
         <div v-if="veh.conn >= 0" class="kv"><span>Манёвр</span><b>{{ simRef?.connLabel(veh.conn) }}</b></div>
         <div v-if="veh.origDest" class="kv"><span>Хотела на</span><b>{{ armName(veh.origDest) }}, не успела перестроиться</b></div>
         <div v-if="veh.route" class="kv"><span>Маршрут автобуса</span><b>{{ cfg.transit.routes.find((r) => r.id === veh!.route)?.name ?? veh.route }}</b></div>
-        <div class="kv"><span>Сейчас</span><b>{{ WHY[veh.why] }}</b></div>
+        <div class="kv"><span>Движение</span><b>{{ veh.v < 0.1 ? 'остановился' : veh.a < -0.1 ? 'замедляется' : 'едет' }}</b></div>
+        <div class="kv"><span>Ограничение движения</span><b>{{ WHY[veh.why] }}</b></div>
+        <div class="small muted">{{ simRef?.explainVehicle(veh) }}</div>
         <div v-if="veh.error" class="alert">⚠ {{ veh.error }}</div>
       </div>
       <div v-else class="muted">Машина уже покинула модель.</div>

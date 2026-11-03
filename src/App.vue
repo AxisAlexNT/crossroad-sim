@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { version as buildVersion } from '../package.json';
 import { computed, onMounted, ref, watch } from 'vue';
-import { app, applyTheme, dialog, rebuild, simRef, type TabId } from './ui/store';
+import { app, applyTheme, dialog, exportSavedOriginal, resumeSaving, rebuild, runInteractive, simRef, type TabId } from './ui/store';
 import { play, startLoop, syncTarget } from './ui/loop';
 import SimTab from './ui/SimTab.vue';
 import EventsTab from './ui/EventsTab.vue';
@@ -36,24 +37,29 @@ const cap = (n: number) => (n > 999 ? '999+' : String(n));
 
 watch(() => app.cfg.name, (n) => { document.title = `${n} — модель перекрёстка`; }, { immediate: true });
 
-onMounted(() => {
+onMounted(async () => {
   applyTheme();
   rebuild();
   // разгон: при открытии на перекрёстке уже есть машины и пешеходы, затем модель сразу идёт.
   // Расчёт ограничен по времени, чтобы на медленном телефоне страница не подвисала
-  simRef.value?.runUntil(PREWARM_SECONDS, 1200);
+  const version = app.version;
+  let ready = true;
+  try { while (version === app.version && !(await runInteractive({ type: 'advance', target: PREWARM_SECONDS }, true))) { /* следующий квант */ } }
+  catch { ready = false; /* Ошибка загрузки уже доступна в состоянии модели. */ }
   syncTarget();
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (!reduce) play();
+  if (ready && version === app.version && !reduce) play();
   startLoop();
 });
 </script>
 
 <template>
+  <div v-if="app.interactiveError" class="alert" role="alert">Расчёт остановлен: {{ app.interactiveError }} <button @click="rebuild()">Перезапустить расчёт</button></div>
+  <div v-if="app.storageIssue" class="alert" role="status">{{ app.storageIssue }} <button @click="exportSavedOriginal">Скачать исходную запись</button> <button @click="resumeSaving">Сохранить текущую модель</button></div>
   <div class="app">
     <header class="top">
       <div class="brand" :title="app.cfg.name">
-        <span class="logo">◈</span><span class="brand-text">{{ brand }}</span>
+        <span class="logo">◈</span><span class="brand-text">{{ brand }}</span><small class="muted">v{{ buildVersion }}</small>
       </div>
       <nav class="tabs">
         <button v-for="[id, label] in TABS" :key="id" :class="{ on: app.tab === id }" @click="app.tab = id">
@@ -67,7 +73,7 @@ onMounted(() => {
     <main>
       <SimTab v-show="app.tab === 'sim'" ref="simTab" />
       <EventsTab v-if="app.tab === 'events'" />
-      <ChartsTab v-if="app.tab === 'charts'" />
+      <ChartsTab v-show="app.tab === 'charts'" />
       <OptTab v-show="app.tab === 'opt'" />
       <EditorTab v-if="app.tab === 'editor'" />
       <SettingsTab v-if="app.tab === 'settings'" />

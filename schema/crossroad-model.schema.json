@@ -655,6 +655,11 @@
           "additionalProperties": {
             "type": "number"
           }
+        },
+        "diagnosticRecovery": {
+          "type": "boolean",
+          "default": false,
+          "description": "Диагностический разъезд. Результаты нельзя использовать для сравнения."
         }
       }
     },

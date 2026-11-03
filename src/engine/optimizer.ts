@@ -3,6 +3,7 @@
 
 import type { CompiledCode, ModelConfig, SignalProgram } from './types';
 import type { Summary } from './sim';
+import type { EvaluationOutcome, InvalidEvaluation } from './evaluate';
 import { cycleLength } from './signals';
 import { buildNetwork } from './network';
 import { longestGreen, maxRed } from './checks';
@@ -75,6 +76,8 @@ export interface Candidate {
   final?: { mean: number[]; ci: number[]; n: number; summary: Summary };
   /** откуда вариант: исходная программа или формула Вебстера */
   origin?: 'start' | 'webster';
+  invalid?: InvalidEvaluation;
+  rejectedAt?: 'search' | 'reeval';
 }
 
 export interface OptProgress {
@@ -252,7 +255,7 @@ export function crowding(front: Candidate[]) {
   }
 }
 
-/** Квантиль распределения Стьюдента 0,975 для 1…30 степеней свободы, дальше — нормальное */
+/** Квантиль Стьюдента 0,975 для 1…30 степеней свободы; далее консервативная граница для 30. */
 const T975 = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.16, 2.145, 2.131, 2.12, 2.11, 2.101, 2.093, 2.086, 2.08, 2.074, 2.069, 2.064, 2.06, 2.056, 2.052, 2.048, 2.045, 2.042];
 
 /** Среднее и полуширина 95 % доверительного интервала */
@@ -262,12 +265,12 @@ export function meanCi(xs: number[]): { mean: number; ci: number } {
   const mean = xs.reduce((a, b) => a + b, 0) / n;
   if (n < 2) return { mean, ci: NaN };
   const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1));
-  return { mean, ci: (T975[n - 2] ?? 1.96) * sd / Math.sqrt(n) };
+  return { mean, ci: T975[Math.min(n - 2, T975.length - 1)] * sd / Math.sqrt(n) };
 }
 
 export type Evaluator = (x: number[]) => Promise<Summary>;
 /** Оценка нескольких вариантов. seedBase — зерно первого прогона, по умолчанию зерно модели */
-export type EvalMany = (xs: number[][], opts?: { seeds?: number; seedBase?: number }) => Promise<Summary[]>;
+export type EvalMany = (xs: number[][], opts?: { seeds?: number; seedBase?: number }) => Promise<EvaluationOutcome[]>;
 
 export class Optimizer {
   private stopFlag = false;
@@ -281,6 +284,7 @@ export class Optimizer {
   private stage: 'search' | 'reeval' = 'search';
   final: Candidate[] = [];
   private abortFlag = false;
+  private rejected = new Map<string, { invalid: InvalidEvaluation; stage: 'search' | 'reeval' }>();
 
   constructor(private cfg: ModelConfig, private s: OptSettings, private evalMany: EvalMany, private onProgress: (p: OptProgress) => void, private webster?: number[] | null) {
     this.rng = seedRng(s.seed);
@@ -334,20 +338,44 @@ export class Optimizer {
   private elapsed() { return (performance.now() - this.t0) / 1000; }
   private outOfTime() { return this.stopFlag || this.elapsed() > this.s.budgetSeconds; }
 
+  private rejectCandidate(c: Candidate, invalid: InvalidEvaluation) {
+    const key = c.x.join(',');
+    if (!this.rejected.has(key)) this.log(`Вариант ${c.x.join(' / ')} с исключён, зерно ${invalid.seed}: ${invalid.reasons.join(', ')}.`);
+    if (this.rejected.size >= 3000) this.rejected.delete(this.rejected.keys().next().value!);
+    this.rejected.set(key, { invalid, stage: this.stage });
+    for (const item of [c, ...this.archive.filter(a => a.x.join(',') === key)]) {
+      item.invalid = invalid; item.rejectedAt = this.stage;
+      item.violation = Infinity; item.obj = this.s.objectives.map(() => Infinity);
+      delete item.summary; delete item.final;
+    }
+  }
+
   private async evaluate(xs: number[][]): Promise<Candidate[]> {
     const out: Candidate[] = xs.map((x) => {
       const vio = violation(this.cfg, this.s, x);
       return { x, obj: [], violation: vio.v, cycle: vio.cycle, gen: this.generation };
     });
-    const feasible = out.filter((c) => c.violation === 0);
+    for (const c of out) {
+      const previous = this.rejected.get(c.x.join(','));
+      if (previous) {
+        c.invalid = previous.invalid; c.rejectedAt = previous.stage; c.violation = Infinity;
+      }
+    }
+    const feasible = out.filter((c) => c.violation === 0 && !c.invalid);
     // недопустимые кандидаты не симулируем — их сравнивают только по нарушению
     for (const c of out) if (c.violation > 0) c.obj = this.s.objectives.map(() => Infinity);
     if (feasible.length) {
       const sums = await this.evalMany(feasible.map((c) => c.x));
+      if (sums.length !== feasible.length) throw new Error('Получен неполный набор оценок.');
       feasible.forEach((c, i) => {
-        c.summary = sums[i];
-        c.obj = objectiveVector(this.s, sums[i], c.cycle);
+        const result = sums[i];
+        if ('invalid' in result) this.rejectCandidate(c, result.invalid);
+        else { c.summary = result; c.obj = objectiveVector(this.s, result, c.cycle); }
       });
+    }
+    for (const c of out) {
+      const rejected = this.rejected.get(c.x.join(','));
+      if (rejected && !c.invalid) this.rejectCandidate(c, rejected.invalid);
     }
     this.evaluations += xs.length;
     this.archive.push(...out);
@@ -356,12 +384,12 @@ export class Optimizer {
   }
 
   best(): Candidate[] {
-    const feas = this.archive.filter((c) => c.violation === 0 && c.summary);
-    if (!feas.length) return [...this.archive].sort((a, b) => a.violation - b.violation).slice(0, 5);
-    if (this.s.objectives.length === 1) return [...feas].sort((a, b) => a.obj[0] - b.obj[0]).slice(0, 10);
+    const feas = this.archive.filter((c) => !c.invalid && c.violation === 0 && c.summary);
+    if (!feas.length) return this.archive.filter(c => !c.invalid).sort((a, b) => a.violation - b.violation).slice(0, 5);
     // множество Парето по архиву (без дубликатов)
     const seen = new Set<string>();
     const uniq = feas.filter((c) => { const k = c.x.join(','); if (seen.has(k)) return false; seen.add(k); return true; });
+    if (this.s.objectives.length === 1) return uniq.sort((a, b) => a.obj[0] - b.obj[0]).slice(0, 10);
     return nonDominatedSort(uniq)[0] ?? [];
   }
 
@@ -395,7 +423,7 @@ export class Optimizer {
     this.log(this.stopFlag ? 'Поиск остановлен пользователем.' : 'Бюджет времени исчерпан.');
     if (!this.abortFlag) await this.reevaluate();
     this.report(true);
-    return this.final.length ? this.final : this.best();
+    return this.stage === 'reeval' ? this.final : this.best();
   }
 
   /**
@@ -413,11 +441,17 @@ export class Optimizer {
     const base = this.cfg.sim.seed + 100003;
     for (let k = 0; k < n; k++) {
       if (this.abortFlag) break;
-      const sums = await this.evalMany(top.map((c) => c.x), { seeds: 1, seedBase: base + k * 7919 });
-      sums.forEach((sm, i) => per[i].push(sm));
-      this.evaluations += top.length;
+      const batch = top.filter(c => !c.invalid);
+      if (!batch.length) break;
+      const sums = await this.evalMany(batch.map((c) => c.x), { seeds: 1, seedBase: base + k * 7919 });
+      if (sums.length !== batch.length) throw new Error('Получен неполный набор перепроверок.');
+      sums.forEach((sm, i) => {
+        if ('invalid' in sm) this.rejectCandidate(batch[i], sm.invalid);
+        else per[top.indexOf(batch[i])].push(sm);
+      });
+      this.evaluations += batch.length;
     }
-    const done = top.map((c, i) => ({ c, runs: per[i] })).filter((r) => r.runs.length);
+    const done = top.map((c, i) => ({ c, runs: per[i] })).filter((r) => !r.c.invalid && r.runs.length === n);
     for (const { c, runs } of done) {
       const objs = runs.map((r) => objectiveVector(this.s, r, c.cycle));
       const stats = this.s.objectives.map((_, j) => meanCi(objs.map((o) => o[j])));
@@ -439,7 +473,8 @@ export class Optimizer {
       const sign = OBJECTIVES[o].sense === 'max' ? -1 : 1;
       return `${OBJECTIVES[o].label.toLowerCase()} ${(sign * c.final!.mean[j]).toFixed(1)} ± ${Number.isFinite(c.final!.ci[j]) ? c.final!.ci[j].toFixed(1) : '—'}`;
     }).join(', ');
-    if (cands[0]) this.log(`Перепроверка закончена. В модели лучший по среднему на новых зёрнах: фазы ${cands[0].x.join(' / ')} с, ${fmt(cands[0])}. Доверительные интервалы 95 %, при их перекрытии варианты в модели не различаются.`);
+    if (cands[0]) this.log(`Перепроверка закончена. В модели лучший по среднему на новых зёрнах: фазы ${cands[0].x.join(' / ')} с, ${fmt(cands[0])}. Доверительные интервалы 95 %; для вывода о различии вариантов требуется парное сравнение.`);
+    else this.log('Нет вариантов, прошедших полную перепроверку.');
   }
 
   private tournament(pop: Candidate[]): Candidate {

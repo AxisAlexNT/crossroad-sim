@@ -58,10 +58,10 @@ async function start() {
     if (!(await ensureSandbox())) { running.value = false; toast('Песочница для пользовательского кода не запускается в этом браузере, подбор недоступен'); return; }
     wasm = await sandboxWasm();
   }
+  try {
   pool = new WorkerPool(settings.workers, wasm);
   const w = settings.useWebster && web.value?.ok ? web.value.durations : null;
   opt = new Optimizer(cfg, settings, (xs, o) => Promise.all(xs.map((x) => pool!.eval({ cfg, code, durations: x, dt: settings.dt, warmup: settings.warmup, horizon: settings.simSeconds, seeds: o?.seeds ?? settings.seeds, seedBase: o?.seedBase }))), (p) => { progress.value = markRaw(p); }, w);
-  try {
     await opt.run();
   } catch (e) {
     toast('Подбор остановлен: ' + (e instanceof Error ? e.message : String(e)));
@@ -90,7 +90,12 @@ function fmtFinal(c: Candidate, j: number) {
   const ci = c.final.ci[j];
   return `${(sign * c.final.mean[j]).toFixed(1)} ± ${Number.isFinite(ci) ? ci.toFixed(1) : '—'}`;
 }
+function candidateStatus(c: Candidate) {
+  if (c.invalid) return `Непригодный прогон, зерно ${c.invalid.seed}: ${c.invalid.reasons.join(", ")}`;
+  return c.final ? "Перепроверен" : c.summary ? "Оценён" : "Нарушены ограничения";
+}
 function applyCand(c: Candidate) {
+  if (c.invalid) { toast(candidateStatus(c)); return; }
   if (c.x.length !== app.cfg.signals.phases.length) { toast('Программа изменилась после подбора, длительности не подходят'); return; }
   app.cfg.signals.phases.forEach((p, i) => { p.duration = c.x[i]; });
   toast('Длительности фаз применены');
@@ -146,7 +151,7 @@ const plotPoints = computed<PlotPoint[]>(() => candidates.value.map((c) => {
   const key = c.x.join(',');
   return {
     v, front: frontKeys.value.has(key), feasible: c.violation === 0 && !!c.summary,
-    label: `Фазы ${c.x.join(' / ')} с, цикл ${c.cycle} с` + (c.summary ? `, ожидание ${c.summary.avgWait.toFixed(1)} с, ${c.summary.throughputVph.toFixed(0)} авт/ч` : ', нарушает ограничения'),
+    label: `Фазы ${c.x.join(' / ')} с, цикл ${c.cycle} с` + (c.summary ? `, ожидание ${c.summary.avgWait.toFixed(1)} с, ${c.summary.throughputVph.toFixed(0)} авт/ч` : ', ' + candidateStatus(c)),
   };
 }));
 const plotTick = ref(0);
@@ -219,15 +224,16 @@ function exportResults() {
     settings: s, objectives: s.objectives.map((o) => OBJECTIVES[o]),
     phases: phaseNames.value, evaluations: p.evaluations, generations: p.generation, elapsed: p.elapsed,
     best: p.best.map((c) => ({ durations: c.x, cycle: c.cycle, objectives: Object.fromEntries(s.objectives.map((o, i) => [o, OBJECTIVES[o].sense === 'max' ? -c.obj[i] : c.obj[i]])), summary: c.summary })),
-    all: candidates.value.map((c) => ({ durations: c.x, cycle: c.cycle, violation: c.violation, generation: c.gen, summary: c.summary })),
+    all: candidates.value.map((c) => ({ durations: c.x, cycle: c.cycle, violation: c.violation, generation: c.gen, status: candidateStatus(c), invalid: c.invalid, rejectedAt: c.rejectedAt, summary: c.summary })),
     final: p.final.map((c) => ({ durations: c.x, cycle: c.cycle, runs: c.final?.n, mean: c.final?.mean, ci95: c.final?.ci, summary: c.final?.summary })),
     log: p.log,
   }, null, 2));
 }
 function exportCsv() {
   const cols = metrics.value;
-  const lines = [cols.map((m) => m.label).join(';')];
-  for (const c of candidates.value) lines.push(cols.map((m) => { const v = m.get(c); return Number.isFinite(v) ? String(v) : ''; }).join(';'));
+  const quote = (v: string) => '"' + v.replaceAll('"', '""') + '"';
+  const lines = [[...cols.map((m) => quote(m.label)), quote('Статус')].join(';')];
+  for (const c of candidates.value) lines.push([...cols.map((m) => { const v = m.get(c); return Number.isFinite(v) ? String(v) : ''; }), quote(candidateStatus(c))].join(';'));
   download(`${fileBase()}-optimization.csv`, lines.join('\n'), 'text/csv');
 }
 </script>
@@ -269,14 +275,18 @@ function exportCsv() {
       </div>
       <div class="table-scroll">
         <table class="tbl">
-          <tr><th>Фаза</th><th>Подбирать</th><th>от, с</th><th>до, с</th><th>сейчас</th></tr>
-          <tr v-for="b in s.bounds" :key="b.idx">
-            <td>{{ app.cfg.signals.phases[b.idx]?.name }}</td>
-            <td><input v-model="b.enabled" type="checkbox" /></td>
-            <td><input v-model.number="b.min" type="number" min="1" step="1" /></td>
-            <td><input v-model.number="b.max" type="number" min="1" step="1" /></td>
-            <td>{{ app.cfg.signals.phases[b.idx]?.duration }}</td>
-          </tr>
+          <thead>
+            <tr><th>Фаза</th><th>Подбирать</th><th>от, с</th><th>до, с</th><th>сейчас</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="b in s.bounds" :key="b.idx">
+              <td>{{ app.cfg.signals.phases[b.idx]?.name }}</td>
+              <td><input v-model="b.enabled" type="checkbox" /></td>
+              <td><input v-model.number="b.min" type="number" min="1" step="1" /></td>
+              <td><input v-model.number="b.max" type="number" min="1" step="1" /></td>
+              <td>{{ app.cfg.signals.phases[b.idx]?.duration }}</td>
+            </tr>
+          </tbody>
         </table>
       </div>
     </section>
@@ -322,14 +332,19 @@ function exportCsv() {
         <h4>Итог после перепроверки на новых зёрнах</h4>
         <div class="table-scroll">
           <table class="tbl">
-            <tr><th>Длительности фаз, с</th><th>Цикл, с</th><th v-for="o in s.objectives" :key="o">{{ OBJECTIVES[o].label }}, {{ OBJECTIVES[o].unit }}</th><th>Прогонов</th><th /></tr>
-            <tr v-for="(c, i) in finalRows" :key="c.x.join(',')" :class="{ front: i === 0 }">
-              <td>{{ c.x.join(' / ') }}{{ c.origin === 'start' ? ', исходная' : c.origin === 'webster' ? ', по Вебстеру' : '' }}</td>
-              <td>{{ c.cycle }}</td>
-              <td v-for="(o, j) in s.objectives" :key="o">{{ fmtFinal(c, j) }}</td>
-              <td>{{ c.final?.n }}</td>
-              <td><button class="btn small" @click="applyCand(c)">Применить</button></td>
-            </tr>
+            <thead>
+              <tr><th>Длительности фаз, с</th><th>Цикл, с</th><th v-for="o in s.objectives" :key="o">{{ OBJECTIVES[o].label }}, {{ OBJECTIVES[o].unit }}</th><th>Прогонов</th><th /></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(c, i) in finalRows" :key="c.x.join(',')" :class="{ front: i === 0 }">
+                <td>{{ c.x.join(' / ') }}{{ c.origin === 'start' ? ', исходная' : c.origin === 'webster' ? ', по Вебстеру' : '' }}</td>
+                <td>{{ c.cycle }}</td>
+                <td v-for="(o, j) in s.objectives" :key="o">{{ fmtFinal(c, j) }}</td>
+                <td>{{ c.final?.n }}</td>
+                <td>{{ candidateStatus(c) }}</td>
+              <td><button class="btn small" :disabled="!!c.invalid" @click="applyCand(c)">Применить</button></td>
+              </tr>
+            </tbody>
           </table>
         </div>
         <div class="small muted">Среднее и половина ширины 95 % доверительного интервала по новым зёрнам, все варианты на одних и тех же потоках машин и пешеходов. Варианты отсортированы по среднему. Если интервалы перекрываются, в модели эти варианты не различаются.</div>
@@ -350,16 +365,21 @@ function exportCsv() {
       </div>
       <div class="table-scroll">
         <table class="tbl">
-          <tr>
-            <th v-for="m in tableCols" :key="m.id" class="sort-th" :title="m.label" @click="clickSort(m.id)">
-              {{ m.label }}<span v-if="sortMark(m.id)" class="sort-mark">{{ sortMark(m.id)!.arrow }}<sup v-if="sortMark(m.id)!.n">{{ sortMark(m.id)!.n }}</sup></span>
-            </th>
-            <th />
-          </tr>
-          <tr v-for="c in rows" :key="c.x.join(',')" :class="{ 'feasible-no': c.violation > 0, front: frontKeys.has(c.x.join(',')), sel: highlight === c.x.join(',') }">
-            <td v-for="m in tableCols" :key="m.id">{{ cell(c, m) }}</td>
-            <td><button class="btn small" @click="applyCand(c)">Применить</button></td>
-          </tr>
+          <thead>
+            <tr>
+              <th v-for="m in tableCols" :key="m.id" class="sort-th" :title="m.label" @click="clickSort(m.id)">
+                {{ m.label }}<span v-if="sortMark(m.id)" class="sort-mark">{{ sortMark(m.id)!.arrow }}<sup v-if="sortMark(m.id)!.n">{{ sortMark(m.id)!.n }}</sup></span>
+              </th>
+              <th>Статус</th><th />
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in rows" :key="c.x.join(',')" :class="{ 'feasible-no': c.violation > 0, front: frontKeys.has(c.x.join(',')), sel: highlight === c.x.join(',') }">
+              <td v-for="m in tableCols" :key="m.id">{{ cell(c, m) }}</td>
+              <td>{{ candidateStatus(c) }}</td>
+              <td><button class="btn small" :disabled="!!c.invalid" @click="applyCand(c)">Применить</button></td>
+            </tr>
+          </tbody>
         </table>
       </div>
       <button v-if="rows.length >= rowLimit" class="btn small" @click="rowLimit += 200">Показать ещё</button>

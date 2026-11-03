@@ -1,0 +1,190 @@
+{
+  "engineVersion": "2.1-dev.34",
+  "htmlSha256": "01751ad68831515edb5a51f99a78b06a39f0ac1b248443bf596388042d8e5c0c",
+  "browser": "isolated desktop Firefox",
+  "checks": [
+    {
+      "readyMs": 937,
+      "before": "0:00",
+      "after": "1:30",
+      "errors": [],
+      "canvases": [
+        {
+          "width": 463,
+          "height": 150
+        },
+        {
+          "width": 463,
+          "height": 150
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        }
+      ],
+      "alerts": [],
+      "mode": "dev",
+      "externalResourceCount": 102
+    },
+    {
+      "readyMs": 1063,
+      "before": "0:00",
+      "after": "1:30",
+      "errors": [],
+      "canvases": [
+        {
+          "width": 468,
+          "height": 150
+        },
+        {
+          "width": 468,
+          "height": 150
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 200,
+          "height": 220
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        },
+        {
+          "width": 300,
+          "height": 150
+        }
+      ],
+      "alerts": [],
+      "mode": "offline",
+      "externalResourceCount": 0
+    }
+  ],
+  "limitations": "Post-navigation error listeners; startup failures additionally detected by rendered map and advancing simulation clock. Shared-host timing; not a cold-cache benchmark."
+}

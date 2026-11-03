@@ -1,0 +1,159 @@
+npm notice run crossroad-sim@0.1.1-dev.0 test
+npm notice run npm run typecheck && npm run test:session && npm run test:body-corridor && npm run test:engine && npm run test:opt && npm run test:report && npm run test:interactive && npm run test:reservation && npm run test:regression && npm run test:numerical-regression
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 typecheck
+> vue-tsc --noEmit -p tsconfig.json
+
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 test:session
+> node --import tsx scripts/session-smoke.ts
+
+Совместимость: 36 вариантов сохранения, ручной код, граф, старые настройки и отчёты потерь
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 test:body-corridor
+> node --import tsx scripts/body-corridor.ts
+
+Body corridor: straight lanes remain independent; turning bus conflict exists.
+Body corridor replay: 2888 stop-line passages without invalid events.
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 test:engine
+> node --import tsx scripts/yield-transfer.ts && node --import tsx scripts/reservation-clearance.ts && node --import tsx scripts/reserved-visibility.ts && node --import tsx scripts/stuck-approach.ts && node --import tsx scripts/sibling-following.ts && node --import tsx scripts/clearing-priority.ts && node --import tsx scripts/yellow-stop.ts && node --import tsx scripts/pet-corridor.ts && node --import tsx scripts/ped-capacity.ts && node --import tsx scripts/exit-diagnostics.ts && node --import tsx scripts/engine-smoke.ts
+
+Yield transfer skew/2042: 1681 exited without invalid events.
+Yield transfer tee/6042: 1708 exited without invalid events.
+Creeping restart skew/29042 dt=0.2: 369 exited without invalid events.
+Creeping restart skew/29042 dt=0.1: 369 exited without invalid events.
+Creeping restart skew/29042 dt=0.05: 373 exited without invalid events.
+Reservation clearance: no late revocation into the opposing swept corridor.
+Reservation clearance replay v2/8042: 2780 exited without invalid events.
+Reserved crossing: newly visible conflicting participant triggers braking before the zone.
+Prolonged wait: approach arrivals and reservations checked before crossing.
+Sibling following: unequal path lengths, body clearance and consistent leader order.
+Phase clearance: stationary participant retains priority until the zone is cleared.
+Phase transition replay v5/18042 dt=0.2: 538 exited without invalid events.
+Phase transition replay v5/18042 dt=0.1: 536 exited without invalid events.
+Phase transition replay v5/18042 dt=0.05: 533 exited without invalid events.
+Phase transition replay v5/20042 dt=0.2: 540 exited without invalid events.
+Phase transition replay v5/20042 dt=0.1: 543 exited without invalid events.
+Phase transition replay v5/20042 dt=0.05: 536 exited without invalid events.
+Phase transition replay cross4/19042 dt=0.2: 442 exited without invalid events.
+Phase transition replay cross4/19042 dt=0.1: 441 exited without invalid events.
+Phase transition replay cross4/19042 dt=0.05: 445 exited without invalid events.
+Phase transition replay cross4/28042 dt=0.2: 440 exited without invalid events.
+Phase transition replay cross4/28042 dt=0.1: 443 exited without invalid events.
+Phase transition replay cross4/28042 dt=0.05: 441 exited without invalid events.
+Yellow signal: stationary queue stays before the line; moving dilemma-zone vehicle may clear.
+PET corridors: actual bodies, occupied/cleared zones, exit clearance, cloned history and expiration pass.
+Pedestrian capacity: bounded groups, explicit rejected demand, continuous arrival and attribute streams.
+Exit diagnostics: partial bay occupancy, released lane and downstream leader.
+v1                   цикл 122 с | 261 авт (1205/ч) ожид 91.5 с очередь 23 | опасн 3 столкн 0 ошиб 0 | пеш 61 ожид 71.9 с опасн 0 наезд 0 | проп 11 наруш 0 блок 0 автоб 9 | проверки E0 W6 | 1576 мс
+   журнал: amber:9 ttc:3 missed-turn:11 slow:1 slow-end:1
+v1a                  цикл 122 с | 262 авт (1209/ч) ожид 90.8 с очередь 23 | опасн 4 столкн 0 ошиб 0 | пеш 61 ожид 71.9 с опасн 0 наезд 0 | проп 11 наруш 0 блок 0 автоб 9 | проверки E0 W8 | 1230 мс
+   журнал: amber:9 ttc:4 missed-turn:11 stall:1 stall-end:1 slow:1 slow-end:1
+v2                   цикл 130 с | 288 авт (1329/ч) ожид 66.9 с очередь 17 | опасн 6 столкн 0 ошиб 0 | пеш 65 ожид 77.1 с опасн 0 наезд 0 | проп 3 наруш 0 блок 0 автоб 10 | проверки E0 W10 | 1106 мс
+   журнал: amber:9 viol-red:1 ttc:6 missed-turn:3
+v3                   цикл 103 с | 290 авт (1338/ч) ожид 76.0 с очередь 19 | опасн 4 столкн 0 ошиб 0 | пеш 59 ожид 62.5 с опасн 0 наезд 0 | проп 3 наруш 1 блок 0 автоб 9 | проверки E0 W3 | 1137 мс
+   журнал: amber:14 ttc:4 viol-red:1 missed-turn:3
+v4                   цикл 125 с | 284 авт (1311/ч) ожид 71.6 с очередь 21 | опасн 7 столкн 0 ошиб 0 | пеш 66 ожид 67.7 с опасн 0 наезд 0 | проп 5 наруш 1 блок 0 автоб 10 | проверки E0 W6 | 1122 мс
+   журнал: amber:10 ttc:5 viol-red:1 missed-turn:5 pet:2
+v5                   цикл  82 с | 286 авт (1320/ч) ожид 60.2 с очередь 21 | опасн 4 столкн 0 ошиб 0 | пеш 63 ожид 15.9 с опасн 0 наезд 0 | проп 5 наруш 0 блок 0 автоб 9 | проверки E0 W11 | 1032 мс
+   журнал: amber:9 missed-turn:5 pet:4
+шаблон cross4        цикл  77 с | 239 авт (1103/ч) ожид 49.1 с очередь 13 | опасн 10 столкн 0 ошиб 0 | пеш 57 ожид 40.7 с опасн 0 наезд 0 | проп 0 наруш 0 блок 0 автоб 0 | проверки E0 W16 | 712 мс
+   журнал: amber:8 pet:6 ttc:4 slow:6 slow-end:4
+шаблон tee           цикл  74 с | 178 авт (822/ч) ожид 15.8 с очередь 6 | опасн 5 столкн 0 ошиб 0 | пеш 19 ожид 20.9 с опасн 0 наезд 0 | проп 0 наруш 0 блок 0 автоб 0 | проверки E0 W3 | 303 мс
+   журнал: pet:5 amber:4
+шаблон skew          цикл  77 с | 199 авт (918/ч) ожид 37.9 с очередь 12 | опасн 13 столкн 0 ошиб 0 | пеш 50 ожид 32.1 с опасн 0 наезд 0 | проп 0 наруш 0 блок 0 автоб 0 | проверки E0 W12 | 559 мс
+   журнал: pet:6 ttc:8 amber:6 slow:5 slow-end:3
+формат: сохранение и загрузка без потерь
+чужой файл: разметка из файла в схему не попадает | цвет #22a387, ширина полосы 3.5, длина подхода 800, шаг 0.02, имя 200 симв., объектов подложки 1
+слишком большой файл: В файле слишком много объектов «связи полос»: 5000, допустимо не больше 400.
+песочница: проехало 233 за 600 с, ошибок кода 0, ручной код сохранён: true
+песочница: доступ к fetch, document, alert, XMLHttpRequest — undefinedundefinedundefinedundefined
+код узлов и параметры: совпадают (248/198/316)
+общие случайные числа: исходный 353+0, пеш 75, другая длительность фазы 353+0, пеш 75, шаг 0,05 с 353+0, пеш 75
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 test:opt
+> node --import tsx scripts/optimizer-validity.ts && node --import tsx scripts/opt-smoke.ts
+
+Optimizer: invalid runs excluded; complete revalidation required; infrastructure errors propagated.
+по умолчанию: фаза не короче 10 с, красный до 90 с, цикл до 120 с, прогонов 3, перепроверка 5×5
+скученность для недопустимых: без NaN
+доверительный интервал [10, 12, 14]: {"mean":12,"ci":4.96867641664592}
+Вебстер: цикл 110 с, Y 0.37, фазы 25 / 22 / 26 / 25
+[27.1 с] Поколение 5: первый по сортировке вариант среднее ожидание у стоп-линии 45.6, ожидание на самом загруженном подходе 61.5, длительности фаз 30 / 11 / 22 / 19 с
+[27.1 с] Бюджет времени исчерпан.
+[27.1 с] Перепроверка лучших вариантов на новых зёрнах: вариантов 1, зёрен 3.
+[28.0 с] Перепроверка закончена. В модели лучший по среднему на новых зёрнах: фазы 30 / 11 / 22 / 19 с, среднее ожидание у стоп-линии 52.2 ± 23.8, ожидание на самом загруженном подходе 85.1 ± 37.3. Доверительные интервалы 95 %; для вывода о различии вариантов требуется парное сравнение.
+итог:
+[30,11,22,19] 52.2±23.8 85.1±37.3
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 test:report
+> node --import tsx scripts/signal-scene.ts && node --import tsx scripts/report-run.ts
+
+Signal export: pedestrian green flash never lights red; both palettes and rewind pass.
+Report run: exact seconds/signal transitions, bounded requests, validation and cancellation.
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 test:interactive
+> node --import tsx scripts/interactive-smoke.ts && node --import tsx scripts/interactive-channel-smoke.ts
+
+Фоновый протокол: 256 квантов, совпадают состояние, сигналы, журнал, ряды и перемотка
+Канал фоновой модели: порядок ответов, ограничение запросов, ошибки, отмена и тайм-аут
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 test:reservation
+> node --import tsx scripts/reservation-order.ts && node --import tsx scripts/occupied-zone.ts && node --import tsx scripts/reservation-long.ts
+
+Reservation order: leader before follower; issued reservation survives stop-line transition.
+Shared-prefix replay v4/20042 dt=0.2: 509 exited without invalid events.
+Shared-prefix replay v4/20042 dt=0.1: 510 exited without invalid events.
+Shared-prefix replay v4/20042 dt=0.05: 510 exited without invalid events.
+Occupied zone: consistent approach/connector coordinates and release after clearance.
+{"seed":42,"t":7200,"exited":2849,"collisions":0,"deadlocks":0,"interventions":0}
+{"seed":1042,"t":7200,"exited":2802,"collisions":0,"deadlocks":0,"interventions":0}
+{"seed":2042,"t":7200,"exited":2776,"collisions":0,"deadlocks":0,"interventions":0}
+{"seed":4042,"t":7200,"exited":2965,"collisions":0,"deadlocks":0,"interventions":0}
+{"seed":6042,"t":7200,"exited":2850,"collisions":0,"deadlocks":0,"interventions":0}
+{"seed":7042,"t":7200,"exited":2880,"collisions":0,"deadlocks":0,"interventions":0}
+{"seed":9042,"t":7200,"exited":2804,"collisions":0,"deadlocks":0,"interventions":0}
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 test:regression
+> node --import tsx scripts/regression.ts
+
+Совместимость, приоритеты, разделение очередей: успешно
+Таймеры и эксперименты: успешно
+Перестроение освобождает старое состояние манёвра: успешно
+Окно ожидания исключает прогрев и учитывает незавершённые поездки: успешно
+Интегралы ожидания совпадают с балансом участников: успешно
+Непригодные прогоны исключаются из сравнения: успешно
+Одновременное слияние: нет блокировки и столкновений
+Задержка: аналитические значения и граница окна совпадают
+Резервации до въезда: три шага расчёта без столкновений и блокировок
+npm warn Unknown env config "global-ignore-file". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> crossroad-sim@0.1.1-dev.0 test:numerical-regression
+> node --import tsx scripts/numerical-regression.ts
+
+Численная регрессия seed=21042, dt=0.2: проехало 528, обслуживаний 12
+Численная регрессия seed=21042, dt=0.1: проехало 530, обслуживаний 12
+Численная регрессия seed=21042, dt=0.05: проехало 534, обслуживаний 12
+Численная регрессия seed=24042, dt=0.2: проехало 560, обслуживаний 22
+Численная регрессия seed=24042, dt=0.1: проехало 557, обслуживаний 21
+Численная регрессия seed=24042, dt=0.05: проехало 563, обслуживаний 21
+Численная регрессия seed=25042, dt=0.2: проехало 534, обслуживаний 17
+Численная регрессия seed=25042, dt=0.1: проехало 538, обслуживаний 17
+Численная регрессия seed=25042, dt=0.05: проехало 534, обслуживаний 17
+Численная регрессия seed=27042, dt=0.2: проехало 545, обслуживаний 15
+Численная регрессия seed=27042, dt=0.1: проехало 548, обслуживаний 15
+Численная регрессия seed=27042, dt=0.05: проехало 546, обслуживаний 15
+Численная регрессия seed=29042, dt=0.2: проехало 527, обслуживаний 12
+Численная регрессия seed=29042, dt=0.1: проехало 527, обслуживаний 12
+Численная регрессия seed=29042, dt=0.05: проехало 527, обслуживаний 12
+Диагностика: краткий цикл не считается блокировкой, устойчивый обнаруживается

@@ -19,8 +19,10 @@ export interface ChartDef {
 export function chartsFor(cfg: Pick<ModelConfig, 'arms'>): ChartDef[] {
   const arms = cfg.arms.map((a) => ({ id: a.id, short: a.short, color: a.color }));
   return [
+    { id: 'active-wait', title: 'Накопленное ожидание машин, присутствующих сейчас', yLabel: 'с', series: (s) => [{ label: 'среднее', color: '#f2a33a', values: s.activeWait }] },
+    { id: 'external-queue', title: 'Ожидают допуска за границей модели', yLabel: 'авт', series: (s) => [{ label: 'внешняя очередь', color: '#9aa3b2', values: s.externalQueue }] },
     {
-      id: 'wait', title: 'Среднее ожидание за последние 5 минут', yLabel: 'с',
+      id: 'wait', title: 'Ожидание прошедших стоп-линию и завершивших переход за 5 минут', yLabel: 'с',
       series: (s) => [{ label: 'машины, с', color: '#f2a33a', values: s.avgWait }, { label: 'пешеходы, с', color: '#b18cff', values: s.pedWait, dash: true }],
     },
     {
@@ -32,7 +34,7 @@ export function chartsFor(cfg: Pick<ModelConfig, 'arms'>): ChartDef[] {
       series: (s) => [{ label: 'проехало стоп-линию', color: '#22a387', values: s.passed }, { label: 'в модели сейчас', color: '#9aa3b2', values: s.inSystem, dash: true }],
     },
     {
-      id: 'queue', title: 'Очередь: наибольшая по полосам подхода вместе с ожидающими въезда в модель', yLabel: 'авт',
+      id: 'queue', title: 'Очередь на дороге: максимум по полосам подхода', yLabel: 'авт',
       series: (s) => [
         { label: 'максимум', color: '#e5484d', values: s.maxQueue },
         ...arms.map((a) => ({ label: a.short, color: a.color, values: s.queues[a.id] ?? [], dash: true })),

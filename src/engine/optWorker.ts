@@ -1,7 +1,7 @@
 // Web Worker: прогоняет симуляцию с заданными длительностями фаз и возвращает метрики.
 // Если в модели есть код, изменённый вручную, воркер сначала получает байты песочницы.
 import '../polyfills';
-import { evaluate, type EvalRequest, type EvalResponse } from './evaluate';
+import { evaluateCandidate, type EvalRequest, type EvalResponse } from './evaluate';
 import { initSandbox } from './sandbox';
 
 type Msg = EvalRequest | { type: 'sandbox'; wasm: ArrayBuffer };
@@ -12,9 +12,10 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
   if ('type' in m) { ready = initSandbox(m.wasm); return; }
   void ready.then(() => {
     try {
-      ctx.postMessage({ id: m.id, summary: evaluate(m) });
+      const result = evaluateCandidate(m);
+      ctx.postMessage('invalid' in result ? { id: m.id, invalid: result.invalid } : { id: m.id, summary: result });
     } catch (err) {
       ctx.postMessage({ id: m.id, error: err instanceof Error ? err.message : String(err) });
     }
-  });
+  }).catch(err => ctx.postMessage({ id: m.id, error: err instanceof Error ? err.message : String(err) }));
 };

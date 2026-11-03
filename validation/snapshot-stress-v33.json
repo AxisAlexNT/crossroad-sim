@@ -1,0 +1,62 @@
+{
+  "engineVersion": "2.1-dev.33",
+  "mode": "stress",
+  "horizon": 900,
+  "stressMeaning": "Intentional overload at configured input-rate limits; dropped demand makes this a resource test, not a valid traffic experiment.",
+  "node": "v24.21.0",
+  "cpu": "AMD Ryzen 9 7900X 12-Core Processor",
+  "samples": 100,
+  "limitations": "Local Node structuredClone and mirror indexing only; excludes Worker scheduling, browser rendering and mobile hardware. Concurrent validation workloads may affect timings.",
+  "results": [
+    {
+      "details": false,
+      "time": 900,
+      "vehicles": 176,
+      "pedestrianGroups": 600,
+      "externalQueues": {
+        "E": 1500,
+        "N": 1500,
+        "W": 1500,
+        "S": 1500
+      },
+      "droppedVehicles": 3434,
+      "droppedPedestrians": 14897,
+      "jsonBytes": 1077894,
+      "copy": {
+        "medianMs": 6.296720000000278,
+        "p95Ms": 7.45060900000135,
+        "maxMs": 10.293055000000095
+      },
+      "accept": {
+        "medianMs": 0.05546900000081223,
+        "p95Ms": 0.07782999999835738,
+        "maxMs": 0.09224899999935587
+      }
+    },
+    {
+      "details": true,
+      "time": 900,
+      "vehicles": 176,
+      "pedestrianGroups": 600,
+      "externalQueues": {
+        "E": 1500,
+        "N": 1500,
+        "W": 1500,
+        "S": 1500
+      },
+      "droppedVehicles": 3434,
+      "droppedPedestrians": 14897,
+      "jsonBytes": 1373317,
+      "copy": {
+        "medianMs": 8.232077999999092,
+        "p95Ms": 9.908556000000317,
+        "maxMs": 12.048882000000958
+      },
+      "accept": {
+        "medianMs": 0.05853899999965506,
+        "p95Ms": 0.07755999999972119,
+        "maxMs": 0.1003900000014255
+      }
+    }
+  ]
+}

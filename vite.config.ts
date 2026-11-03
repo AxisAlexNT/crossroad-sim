@@ -45,7 +45,7 @@ function noImportMeta(): Plugin {
 
 // Всё (скрипты, стили, шрифты, воркеры, песочница, подложка) встраивается в один dist/index.html,
 // который работает офлайн, без сервера и без сети.
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   base: './',
   plugins: [quickjsNoWasmUrl(), vue(), noImportMeta(), viteSingleFile({ removeViteModuleLoader: true })],
   resolve: {
@@ -56,7 +56,9 @@ export default defineConfig({
       canvg: stub,
     },
   },
-  esbuild: { target: TARGET },
+  // HMR использует import.meta.hot. Понижение до ES2019 в dev заменяет
+  // import.meta пустым объектом и ломает запуск компонентов.
+  esbuild: { target: command === 'build' ? TARGET : 'esnext' },
   // classic (iife) воркер: модульные blob-воркеры не запускаются из file:// в Chromium
   worker: { format: 'iife', plugins: () => [quickjsNoWasmUrl()] },
   build: {
@@ -67,4 +69,4 @@ export default defineConfig({
     chunkSizeWarningLimit: 6000,
     reportCompressedSize: false,
   },
-});
+}));

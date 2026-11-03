@@ -55,7 +55,7 @@ function build() {
 }
 
 function data(): uPlot.AlignedData {
-  return [props.x, ...props.series.map((s) => s.values)] as uPlot.AlignedData;
+  return [props.x, ...props.series.map((s) => s.values.map(v => Number.isFinite(v) ? v : null))] as uPlot.AlignedData;
 }
 
 onMounted(() => {

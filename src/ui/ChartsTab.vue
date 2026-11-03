@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import Experiments from './Experiments.vue';
 import UChart from './UChart.vue';
 import Histogram from './Histogram.vue';
 import { chartsFor } from './charts';
@@ -40,13 +41,14 @@ function exportCsv() {
     else cols.push([k, v as number[]]);
   }
   const rows = [cols.map((c) => c[0]).join(';')];
-  for (let i = 0; i < s.t.length; i++) rows.push(cols.map((c) => c[1][i] ?? '').join(';'));
+  for (let i = 0; i < s.t.length; i++) rows.push(cols.map((c) => Number.isFinite(c[1][i]) ? c[1][i] : '').join(';'));
   download(`${fileBase()}-metrics.csv`, rows.join('\n'), 'text/csv');
 }
 </script>
 
 <template>
   <div class="charts-tab">
+    <Experiments />
     <div class="row between wrap gap">
       <div class="muted small">Выделите участок мышью или пальцем, чтобы приблизить. Двойной щелчок сбрасывает масштаб. Значения видны в легенде при наведении.</div>
       <button class="btn small" @click="exportCsv">Скачать CSV</button>

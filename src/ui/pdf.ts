@@ -7,9 +7,11 @@ import 'svg2pdf.js';
 import regularUrl from '../assets/fonts/DejaVuSans-subset.ttf?inline';
 import boldUrl from '../assets/fonts/DejaVuSans-Bold-subset.ttf?inline';
 import { app, fileBase, simRef } from './store';
-import { compileModel, hasCustomCode } from '../engine/compile';
-import { ensureSandbox } from './sandboxLoader';
-import { Simulation, type Series } from '../engine/sim';
+import { hasCustomCode } from '../engine/compile';
+import { sandboxWasm } from './sandboxLoader';
+import { InteractiveClient } from './interactiveClient';
+import { runReport, reportAbort } from './reportRun';
+import type { Series } from '../engine/sim';
 import { buildTimeline, cycleLength, groupBands, type Lamp } from '../engine/signals';
 import { phasePedEdges, phasePermits, type CheckResult } from '../engine/checks';
 import { chartsFor } from './charts';
@@ -36,8 +38,12 @@ function parseSvg(text: string): SVGSVGElement {
   host.appendChild(document.importNode(el, true));
   document.body.appendChild(host);
   const live = host.firstChild as SVGSVGElement;
-  setTimeout(() => host.remove(), 2000);
   return live;
+}
+
+async function drawSvg(doc: jsPDF, svg: SVGSVGElement, options: { x: number; y: number; width: number; height: number }) {
+  try { await doc.svg(svg, options); }
+  finally { svg.parentElement?.remove(); }
 }
 
 function pictoSvg(cfg: ModelConfig, net: Network, phaseIdx: number): SVGSVGElement {
@@ -81,7 +87,7 @@ function drawChart(doc: jsPDF, x: number, y: number, w: number, h: number, title
   if (!t.length) return;
   const tMax = t[t.length - 1] || 1;
   let vMax = 0;
-  for (const s of series) for (const v of s.values) vMax = Math.max(vMax, v);
+  for (const s of series) for (const v of s.values) if (Number.isFinite(v)) vMax = Math.max(vMax, v);
   vMax = vMax || 1;
   // круглые деления оси: 1, 2 или 5 на степень десяти
   const raw = vMax / 4;
@@ -106,6 +112,7 @@ function drawChart(doc: jsPDF, x: number, y: number, w: number, h: number, title
     doc.setLineWidth(0.45);
     let prev: [number, number] | null = null;
     for (let i = 0; i < t.length; i += step) {
+      if (!Number.isFinite(s.values[i])) { prev = null; continue; }
       const px = x + (t[i] / tMax) * w;
       const py = y + h - (Math.min(vMax, s.values[i] ?? 0) / vMax) * h;
       if (prev) doc.line(prev[0], prev[1], px, py);
@@ -126,26 +133,28 @@ export interface PdfOptions {
   source: 'current' | 'rerun';
   unit: 'seconds' | 'steps';
   amount: number;
+  signal?: AbortSignal;
 }
 
 export async function exportPdf(o: PdfOptions): Promise<void> {
   const cfg: ModelConfig = JSON.parse(JSON.stringify(app.cfg));
   const cur = simRef.value;
   if (!cur) throw new Error('модель не готова');
-  let series: Series = cur.series;
-  let simForStats = cur;
-  let disposeLater: Simulation | null = null;
-  if (o.source === 'rerun') {
-    const { code } = compileModel(cfg);
-    if (hasCustomCode(cfg)) await ensureSandbox();
-    const sim = new Simulation(cfg, code);
-    disposeLater = sim;
-    if (o.unit === 'seconds') sim.runUntil(Math.max(1, o.amount));
-    else for (let i = 0; i < Math.max(1, o.amount); i++) sim.runToNextLampChange();
-    series = sim.series;
-    simForStats = sim;
-  }
+  reportAbort(o.signal);
+  let series: Series = structuredClone(cur.series);
+  let state = structuredClone(cur.st);
   const net = cur.net;
+  const checks = JSON.parse(JSON.stringify(app.checks)) as CheckResult[];
+  const presetId = app.presetId, showBasemap = app.showBasemap;
+  const outputName = fileBase();
+  if (o.source === 'rerun') {
+    const wasm = hasCustomCode(cfg) ? (await sandboxWasm()).slice().buffer : undefined;
+    reportAbort(o.signal);
+    const frame = await runReport(new InteractiveClient(wasm), cfg, o);
+    state = frame.state;
+    series = frame.details!.series;
+  }
+  reportAbort(o.signal);
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   doc.addFileToVFS('DejaVuSans.ttf', b64(regularUrl));
@@ -173,14 +182,15 @@ export async function exportPdf(o: PdfOptions): Promise<void> {
   };
 
   // --- страница 1: схема ---
-  const preset = PRESETS.find((p) => p.id === app.presetId);
+  const preset = PRESETS.find((p) => p.id === presetId);
   text(cfg.name, 15, true);
   text(`Экспорт результатов модели светофорного регулирования · ${new Date().toLocaleString('ru-RU')}`, 9, false, 90);
   if (preset && cfg.arms.length === 4) text(`Исходная схема: ${preset.name}. Программа могла быть изменена вручную.`, 9, false, 90);
   {
-    const svg = parseSvg(sceneSvg(net, cfg, { palette: LIGHT, state: cur.st, region: 'crossing', widthPx: 800, font: 'DejaVuSans', basemap: app.showBasemap, attributionOutside: true }));
+    const svg = parseSvg(sceneSvg(net, cfg, { palette: LIGHT, state, region: 'crossing', widthPx: 800, font: 'DejaVuSans', basemap: showBasemap, attributionOutside: true }));
     const size = Math.min(W - 2 * M, BOTTOM - y - 30);
-    await doc.svg(svg, { x: M + (W - 2 * M - size) / 2, y: y + 2, width: size, height: size });
+    reportAbort(o.signal);
+    await drawSvg(doc, svg, { x: M + (W - 2 * M - size) / 2, y: y + 2, width: size, height: size });
     y += size + 6;
   }
   if (app.showBasemap && cfg.basemap) text(`Подложка: ${cfg.basemap.attribution}.`, 8, false, 100);
@@ -202,7 +212,8 @@ export async function exportPdf(o: PdfOptions): Promise<void> {
     if (col === 0 && i > 0) y += pictoSize + 30;
     if (y + pictoSize + 24 > BOTTOM) newPage();
     const x = M + col * cell;
-    await doc.svg(pictoSvg(cfg, net, i), { x: x + 2, y, width: pictoSize, height: pictoSize });
+    reportAbort(o.signal);
+    await drawSvg(doc, pictoSvg(cfg, net, i), { x: x + 2, y, width: pictoSize, height: pictoSize });
     doc.setFont('DejaVuSans', 'bold'); doc.setFontSize(9); doc.setTextColor(20);
     const head = doc.splitTextToSize(`${ph.name} — ${ph.duration} с`, cell - 4) as string[];
     doc.text(head, x + 2, y + pictoSize + 4);
@@ -251,7 +262,7 @@ export async function exportPdf(o: PdfOptions): Promise<void> {
 
   // --- страница 3: графики ---
   newPage();
-  text(`Метрики. ${o.source === 'rerun' ? `Новый прогон: ${o.amount} ${o.unit === 'seconds' ? 'с' : 'переключений фаз'}` : `Текущая симуляция, ${cur.st.t.toFixed(0)} с`}`, 13, true);
+  text(`Метрики. ${o.source === 'rerun' ? `Новый прогон: ${o.amount} ${o.unit === 'seconds' ? 'с' : 'переключений фаз'}` : `Текущая симуляция, ${state.t.toFixed(0)} с`}`, 13, true);
   y += 4;
   const ch = chartsFor(cfg).filter((c) => c.id !== 'errors');
   const chw = (W - 2 * M - 14) / 2, chh = 40;
@@ -266,15 +277,15 @@ export async function exportPdf(o: PdfOptions): Promise<void> {
   });
   const lastRows = Math.ceil(((ch.length - 1) % perPage + 1) / 2);
   y = base + 4 + lastRows * (chh + 26) + 4;
-  const c = simForStats.st.counters;
-  text(`Итоги. Машины: проехало стоп-линию ${c.crossedStop}, покинуло модель ${c.exited}, опасных моментов ${c.dangers}, пересечений траекторий ${c.crossings}, столкновений в модели ${c.collisions}, ошибок выбора полосы ${c.errors}, максимальная очередь ${simForStats.st.maxQueue} авт.`, 9);
+  const c = state.counters;
+  text(`Итоги. Машины: проехало стоп-линию ${c.crossedStop}, покинуло модель ${c.exited}, опасных моментов ${c.dangers}, пересечений траекторий ${c.crossings}, столкновений в модели ${c.collisions}, ошибок выбора полосы ${c.errors}, максимальная очередь ${state.maxQueue} авт.`, 9);
   text(`Пешеходы: перешли ${c.pedDone} чел., опасных сближений с машинами ${c.pedDangers}, наездов ${c.pedHits}.`, 9);
 
   // --- страница 4: проверки ---
   newPage();
   text('Проверки конфигурации', 13, true);
   const LV: Record<CheckResult['level'], string> = { error: 'Ошибка', warn: 'Предупреждение', info: 'Сведения' };
-  for (const r of app.checks) text(`${LV[r.level]}: ${r.msg}`, 8, false, r.level === 'error' ? 160 : 40);
+  for (const r of checks) text(`${LV[r.level]}: ${r.msg}`, 8, false, r.level === 'error' ? 160 : 40);
 
   // колонтитулы на всех страницах
   const pages = doc.getNumberOfPages();
@@ -291,6 +302,6 @@ export async function exportPdf(o: PdfOptions): Promise<void> {
     doc.text(`${cfg.name} · модель, не замер`, M, H - 7);
     doc.text(`${i} / ${pages}`, W - M, H - 7, { align: 'right' });
   }
-  doc.save(`${fileBase()}.pdf`);
-  disposeLater?.dispose();
+  reportAbort(o.signal);
+  doc.save(`${outputName}.pdf`);
 }
