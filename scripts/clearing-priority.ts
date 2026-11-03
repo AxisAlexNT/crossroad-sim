@@ -59,6 +59,21 @@ try {
       'The clearing vehicle must be outside the instantaneous body corridor in this regression');
     assert.equal(internal.mustWait(entering, entering.conn, cr, offset + cr.start, offset + cr.end), true,
       'A clearing vehicle can restart while inside the conservative zone; instantaneous free space must not cancel phase priority');
+    sim.permit[clearing.conn] = 'main';
+    clearing.committed = clearing.committed.filter(id => id !== cr.conflict);
+    clearing.acceptedGrants = undefined; clearing.yieldingAt = -1; clearing.yieldTo = -1;
+    const blocked = () => internal.mustWait(entering, entering.conn, cr, offset + cr.start, offset + cr.end);
+    assert.equal(blocked(), false, 'This stationary body leaves a usable gap in the absence of an accepted grant');
+    clearing.committed.push(cr.conflict); clearing.acceptedGrants = { [cr.conflict]: entering.id };
+    assert.equal(blocked(), true, 'The giver must honor accepted passage even when the stationary recipient leaves its instantaneous corridor clear');
+    clearing.acceptedGrants[cr.conflict] = 99999;
+    assert.equal(blocked(), false, 'A grant from someone else cannot bind this giver');
+    clearing.acceptedGrants[cr.conflict] = entering.id;
+    const zone = sim.net.conflicts[cr.conflict];
+    const otherEnd = cr.side === 'a' ? zone.bEnd : zone.aEnd;
+    clearing.s = otherEnd + clearing.len + 1;
+    sim.pose(clearing); internal.index();
+    assert.equal(blocked(), false, 'Rear clearance releases the accepted grant');
   } finally { sim.dispose(); }
 }
 for (const dt of [.2, .1, .05]) {

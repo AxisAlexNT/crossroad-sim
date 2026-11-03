@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { defaultModel } from '../src/engine/presets';
+import { defaultModel, TEMPLATES } from '../src/engine/presets';
 import { compileModel } from '../src/engine/compile';
 import { Simulation, type Vehicle } from '../src/engine/sim';
 import { invalidRunReasons } from '../src/engine/runValidity';
@@ -83,6 +83,77 @@ for (const joiningId of ['S0-W0', 'S0-N0']) {
     relay.v = 0; relay.yieldTo = leader.id;
     assert.notEqual(internal.siblingFollowing(follower, leader, through.path.length), null,
       'A cycle without an addressed grant to the recipient must terminate without releasing passage');
+  } finally { sim.dispose(); }
+}
+
+// Ожидание свободного места за общей частью полосы остаётся очередью,
+// даже если впереди поворачивают, а сзади едут прямо.
+{
+  const model = TEMPLATES.find(t => t.id === 'skew')!.make();
+  const sim = new Simulation(model, compileModel(model).code, { headless: true });
+  try {
+    sim.runUntil(60); const base = sim.st.vehicles[0]; assert.ok(base);
+    const turnW = sim.net.conns.find(c => c.conn.id === 'W0-NE0')!;
+    const turnE = sim.net.conns.find(c => c.conn.id === 'E0-SW0')!;
+    const throughE = sim.net.conns.find(c => c.conn.id === 'E0-W0')!;
+    const cr = turnW.conflicts.find(ref => ref.other === throughE.idx)!; assert.ok(cr);
+    const make = (id: number, ci: number, s: number): Vehicle => ({
+      ...structuredClone(base), id, conn: ci, phase: 'conn', s, v: 0, a: 0,
+      origin: sim.net.conns[ci].conn.from.arm, dest: sim.net.conns[ci].conn.to.arm,
+      len: 4.5, wid: 1.8, committed: [], acceptedGrants: undefined, why: 'yield',
+      route: null, bayT: 0, bayShift: 0, yieldingAt: -1, yieldTo: -1,
+    });
+    const waiting = make(10001, turnW.idx, 9.858);
+    const leader = make(10002, turnE.idx, 9.858);
+    const follower = make(10003, throughE.idx, 3.255); follower.yieldTo = leader.id;
+    const internal = sim as unknown as { index(): void; mustWait(v: Vehicle, ci: number, ref: typeof cr, start: number, end: number): boolean };
+    sim.st.vehicles = [waiting, leader, follower]; sim.st.peds = [];
+    sim.permit.fill('none'); sim.st.permitEnd.fill(0);
+    for (const v of sim.st.vehicles) sim.pose(v);
+    const blocked = () => { internal.index(); return internal.mustWait(waiting, waiting.conn, cr, cr.start - waiting.s, cr.end - waiting.s); };
+    assert.equal(blocked(), false, 'A stopped follower behind a diverging leader cannot indefinitely block the opposite turn');
+    follower.yieldTo = 99999;
+    assert.equal(blocked(), true, 'Unrelated waiting must not be treated as a queue in the same lane');
+    follower.yieldTo = leader.id; leader.v = 1;
+    assert.equal(blocked(), true, 'A moving leader can release its follower and cannot establish a stationary queue');
+  } finally { sim.dispose(); }
+}
+
+// Неподвижная очередь на своём подходе может подтвердить проезд через
+// ожидающий встречный поток. Это не разрешение всем встречным направлениям.
+{
+  const sim = new Simulation(cfg, compileModel(cfg).code, { headless: true });
+  try {
+    sim.runUntil(60); const base = sim.st.vehicles[0]; assert.ok(base);
+    const a = sim.net.conns.find(c => c.conn.id === 'S0-N0' && c.variant === 0)!;
+    const b = sim.net.conns.find(c => c.conn.id === 'N0-S0' && c.variant === 2)!;
+    const c = sim.net.conns.find(c => c.conn.id === 'S0-W0' && c.variant === 1)!;
+    const make = (id: number, ci: number, s: number, len: number, wid: number, lat: number, lat2: number): Vehicle => ({
+      ...structuredClone(base), id, conn: ci, phase: 'conn', s, len, wid, lat, lat2, v: 0, a: 0,
+      origin: sim.net.conns[ci].conn.from.arm, dest: sim.net.conns[ci].conn.to.arm,
+      committed: [], acceptedGrants: undefined, why: 'yield', route: null, bayT: 0, bayShift: 0,
+    });
+    const receiver = make(10001, a.idx, 15.991667, 4.6611, 1.8, -.09424, -.16293);
+    const waiting = make(10002, b.idx, 7.175089, 5.9542, 2, .23181, -.14299);
+    const giver = make(10003, c.idx, 5.094564, 4.781, 1.8, .41507, -.47165);
+    receiver.yieldTo = waiting.id; waiting.yieldTo = giver.id; giver.yieldTo = receiver.id;
+    sim.st.vehicles = [receiver, waiting, giver]; sim.st.peds = [];
+    const internal = sim as unknown as { index(): void; acceptSiblingGrant(v: Vehicle, ci: number, other: Vehicle): boolean };
+    for (const v of sim.st.vehicles) sim.pose(v);
+    internal.index();
+    assert.equal(internal.acceptSiblingGrant(receiver, a.idx, waiting), true,
+      'Consent from the receiving approach can pass through a stationary oncoming queue with a clear whole path');
+    giver.why = 'merge'; giver.whyId = receiver.id; giver.yieldTo = -1;
+    assert.equal(internal.acceptSiblingGrant(receiver, a.idx, waiting), true,
+      'Waiting behind this receiver on the shared input lane also acknowledges its passage');
+    giver.whyId = 99999;
+    assert.equal(internal.acceptSiblingGrant(receiver, a.idx, waiting), false,
+      'Following someone else cannot acknowledge passage for this receiver');
+    giver.why = 'yield'; giver.yieldTo = receiver.id;
+    waiting.v = 1;
+    assert.equal(internal.acceptSiblingGrant(receiver, a.idx, waiting), false);
+    waiting.v = 0; giver.yieldTo = 99999;
+    assert.equal(internal.acceptSiblingGrant(receiver, a.idx, waiting), false);
   } finally { sim.dispose(); }
 }
 

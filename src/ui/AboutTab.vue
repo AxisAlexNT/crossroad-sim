@@ -3,6 +3,7 @@ import { nextTick, onMounted, watch } from 'vue';
 import { SOURCES, ASSUMPTIONS, ASSUMPTIONS_INTRO, SOURCE_KIND_NAME, type SourceKind } from '../engine/sources';
 import { app } from './store';
 import licensesText from '../../THIRD_PARTY_LICENSES.txt?raw';
+import changelogText from '../../CHANGELOG.MD?raw';
 
 const LIBS = [
   ['Vue 3', 'MIT', 'https://github.com/vuejs/core'],
@@ -103,6 +104,10 @@ watch(() => app.aboutAnchor, scrollToAnchor);
         <summary>Полные тексты лицензий сторонних компонентов</summary>
         <pre>{{ licensesText }}</pre>
       </details>
+    </section>
+    <section id="changelog">
+      <h3 id="changelog-title">История изменений</h3>
+      <pre class="changelog-text" role="region" aria-labelledby="changelog-title" tabindex="0">{{ changelogText }}</pre>
     </section>
   </div>
 </template>

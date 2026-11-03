@@ -45,5 +45,13 @@ try {
   assert.equal(waits(), true, 'An addressed yield cannot override insufficient stopping distance');
   yielding.s = leftStart + .1; yielding.v = 2;
   assert.equal(waits(), true, 'A vehicle already in the conflict zone retains physical occupancy');
+  yielding.phase = 'approach'; yielding.lane = left.conn.from.lane;
+  sim.permit[left.idx] = 'main';
+  yielding.s = sim.net.arms[yielding.origin].cfg.approachLength - 2;
+  yielding.v = 3.75; yielding.a = -2; yielding.committed = [];
+  assert.ok(leftStart + 2 > yielding.v * yielding.v / 8 + 1);
+  assert.equal(waits(), false, 'Inability to stop at the line does not imply inability to stop before the conflict');
+  yielding.s += leftStart + 1;
+  assert.equal(waits(), true, 'A priority participant still yields to an unavoidable arrival at the conflict itself');
   console.log('Уступка в движении: приоритет, адресат, замедление и возможность остановки проверены.');
 } finally { sim.dispose(); }

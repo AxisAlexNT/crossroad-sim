@@ -1,7 +1,8 @@
 {
   "name": "crossroad-sim",
   "private": true,
-  "version": "0.1.1-dev.0",
+  "version": "1.0.6",
+  "releaseChannel": "intermediate",
   "description": "Интерактивная модель перекрёстка Оборонной и Тверской улиц в Колпино: фазы, полосы, симуляция, подбор длительностей",
   "license": "MIT",
   "type": "module",
@@ -14,7 +15,7 @@
     "build": "vite build",
     "build:check": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "test:engine": "node --import tsx scripts/stationary-priority.ts && node --import tsx scripts/moving-yield.ts && node --import tsx scripts/yield-transfer.ts && node --import tsx scripts/reservation-clearance.ts && node --import tsx scripts/reserved-visibility.ts && node --import tsx scripts/stuck-approach.ts && node --import tsx scripts/sibling-following.ts && node --import tsx scripts/clearing-priority.ts && node --import tsx scripts/yellow-stop.ts && node --import tsx scripts/pet-corridor.ts && node --import tsx scripts/ped-capacity.ts && node --import tsx scripts/exit-diagnostics.ts && node --import tsx scripts/priority-regression.ts && node --import tsx scripts/engine-smoke.ts",
+    "test:engine": "node --import tsx scripts/stationary-priority.ts && node --import tsx scripts/moving-yield.ts && node --import tsx scripts/yield-transfer.ts && node --import tsx scripts/reservation-clearance.ts && node --import tsx scripts/reserved-visibility.ts && node --import tsx scripts/stuck-approach.ts && node --import tsx scripts/storage-lookahead.ts && node --import tsx scripts/cycle-consent.ts && node --import tsx scripts/sibling-following.ts && node --import tsx scripts/clearing-priority.ts && node --import tsx scripts/grant-retention.ts && node --import tsx scripts/grant-return.ts && node --import tsx scripts/yellow-stop.ts && node --import tsx scripts/pet-corridor.ts && node --import tsx scripts/ped-capacity.ts && node --import tsx scripts/exit-diagnostics.ts && node --import tsx scripts/priority-regression.ts && node --import tsx scripts/engine-smoke.ts",
     "test:opt": "node --import tsx scripts/optimizer-validity.ts && node --import tsx scripts/opt-smoke.ts",
     "test:stall": "node --import tsx scripts/stall-test.ts",
     "licenses": "node scripts/licenses.mjs",
@@ -30,7 +31,8 @@
     "test:body-corridor": "node --import tsx scripts/restart-body.ts && node --import tsx scripts/body-corridor.ts",
     "test:report": "node --import tsx scripts/signal-scene.ts && node --import tsx scripts/report-run.ts",
     "test:kinematics": "node --import tsx scripts/kinematics.ts",
-    "test:arrivals": "node --import tsx scripts/arrivals.ts"
+    "test:arrivals": "node --import tsx scripts/arrivals.ts",
+    "repro:interlocking": "node --import tsx scripts/repro-interlocking.ts"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

@@ -7,10 +7,15 @@ import { invalidRunReasons } from '../src/engine/runValidity';
 // Длительная стоянка приоритетного участника и возобновление движения
 // после смены фазы. Начальные состояния задаются только публичными моделями.
 const cases: Array<[string, number, number, number]> = [
+  ['v1', 42, .1, 7200],
+  ['v1', 3042, .1, 7200],
+  ...[.2, .1, .05].map(dt => ['skew', 1042, dt, 1500] as [string, number, number, number]),
   ['v2', 149042, .2, 1500], ['v2', 149042, .1, 1500],
   ['v5', 63042, .05, 1500], ['v5', 71042, .05, 1500], ['v5', 113042, .2, 1500],
+  ['v5', 13042, .05, 1500],
   ['cross4', 61042, .05, 1500], ['tee', 133042, .2, 1500],
   ['skew', 59042, .2, 1500], ['skew', 59042, .1, 1500], ['skew', 108042, .1, 1500],
+  ...[.2, .1, .05].map(dt => ['skew', 23042, dt, 1500] as [string, number, number, number]),
   ...[.2, .1, .05].map(dt => ['skew', 7042, dt, 7200] as [string, number, number, number]),
 ];
 const failures: string[] = [];

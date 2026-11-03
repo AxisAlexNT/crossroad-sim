@@ -32,6 +32,24 @@ try {
   internal.accel(bus);
   assert.equal(String(bus.why), 'yield', 'The reservation is rechecked while an unobstructing stop remains possible');
   assert.equal(bus.whyId, cr.conflict);
+  const target = bus.s + internal.clearYieldGap(bus, cr.conflict, cr.start - bus.s - 1) - bus.s0;
+  bus.s = target - .05; bus.v = .1;
+  sim.pose(bus); internal.index();
+  internal.accel(bus);
+  assert.equal(bus.whyId, cr.conflict,
+    'A reserved vehicle already braking to a clear waiting position must keep yielding within the last 0.3 m');
+  // Начав проезд через временный разрыв в очереди, машина сохраняет
+  // очередность до того, как уже не сможет остановиться у точки ожидания.
+  bus.s = cr.start - 2.4; bus.v = .1;
+  bus.committed = turn.conflicts.filter(ref => ref.conflict !== cr.conflict).map(ref => ref.conflict);
+  car.v = 0; car.a = 0; car.why = 'leader'; car.whyId = 10003;
+  const queuedLeader: Vehicle = { ...structuredClone(car), id: 10003, phase: 'exit', s: 40, why: 'exit', whyId: -1 };
+  sim.st.vehicles = [bus, car, queuedLeader];
+  for (const v of sim.st.vehicles) sim.pose(v);
+  internal.index();
+  internal.accel(bus);
+  assert.ok(bus.committed.includes(cr.conflict),
+    'Reservation must account for both the one-metre zone margin and the standstill gap');
   console.log('Reservation clearance: no late revocation into the opposing swept corridor.');
 } finally { sim.dispose(); }
 

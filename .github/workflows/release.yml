@@ -25,7 +25,18 @@ jobs:
       - run: npm run check:dist
       - name: Имя файла с версией
         run: cp dist/index.html "crossroad-sim-${GITHUB_REF_NAME}.html"
+      - name: Канал выпуска
+        id: channel
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = require('./package.json');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'prerelease=' + String(pkg.releaseChannel === 'intermediate') + '\n');
+          NODE
       - uses: softprops/action-gh-release@v2
         with:
           files: crossroad-sim-${{ github.ref_name }}.html
+          body_path: CHANGELOG.MD
+          prerelease: ${{ steps.channel.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.channel.outputs.prerelease == 'true' && 'false' || 'legacy' }}
           generate_release_notes: true

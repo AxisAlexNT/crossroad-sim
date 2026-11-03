@@ -9,6 +9,7 @@ dist/
 !/.nvmrc
 !/LICENSE
 !/README.md
+!/CHANGELOG.MD
 !/THIRD_PARTY_LICENSES.txt
 !/docs/
 !/index.html
@@ -41,4 +42,6 @@ dist/
 !/validation/stall-v33.json
 !/validation/wait-v33-v1-1042-455.json
 !/validation/wait-v33-v2-5042-925.json
+!/validation/repro-interlocking-v106.session.json
+!/validation/repro-interlocking-v106.replay.json
 /docs/validation-history.md
