@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { defaultModel } from '../src/engine/presets';
+import { defaultModel, TEMPLATES } from '../src/engine/presets';
 import { compileModel } from '../src/engine/compile';
 import { Simulation, type Vehicle } from '../src/engine/sim';
 import type { ConflictRef } from '../src/engine/network';
+import { invalidRunReasons } from '../src/engine/runValidity';
 const cfg = defaultModel('v1');
 const sim = new Simulation(cfg, compileModel(cfg).code, { headless: true });
 try {
@@ -41,3 +42,32 @@ try {
   assert.equal(internal.mustWait(waiting, a.idx, cr, 10 + cr.start, 10 + cr.end), false, 'Fully cleared vehicle releases the new phase');
   console.log('Phase clearance: stationary participant retains priority until the zone is cleared.');
 } finally { sim.dispose(); }
+
+{
+  const cfg = TEMPLATES.find(t => t.id === 'tee')!.make(); cfg.sim.seed = 133042; cfg.sim.dt = .2;
+  const sim = new Simulation(cfg, compileModel(cfg).code, { headless: true });
+  try {
+    sim.runUntil(28.6);
+    const entering = sim.st.vehicles.find(v => v.origin === 'S' && v.dest === 'W')!;
+    const clearing = sim.st.vehicles.find(v => v.origin === 'E' && v.dest === 'S' && v.phase === 'conn')!;
+    assert.ok(entering && clearing);
+    const cr = sim.net.conns[entering.conn].conflicts.find(ref => ref.other === clearing.conn)!; assert.ok(cr);
+    const internal = sim as unknown as { index(): void; sweepHits(v: Vehicle, ci: number, start: number, end: number, o: Vehicle): boolean; mustWait(v: Vehicle, ci: number, cr: ConflictRef, start: number, end: number): boolean };
+    internal.index();
+    const offset = sim.net.arms[entering.origin].cfg.approachLength - entering.s;
+    assert.equal(internal.sweepHits(entering, entering.conn, cr.start, cr.end + entering.len, clearing), false,
+      'The clearing vehicle must be outside the instantaneous body corridor in this regression');
+    assert.equal(internal.mustWait(entering, entering.conn, cr, offset + cr.start, offset + cr.end), true,
+      'A clearing vehicle can restart while inside the conservative zone; instantaneous free space must not cancel phase priority');
+  } finally { sim.dispose(); }
+}
+for (const dt of [.2, .1, .05]) {
+  const cfg = TEMPLATES.find(t => t.id === 'tee')!.make(); cfg.sim.seed = 133042; cfg.sim.dt = dt;
+  const sim = new Simulation(cfg, compileModel(cfg).code, { headless: true });
+  try {
+    sim.runUntil(1500);
+    assert.deepEqual(invalidRunReasons(sim.st.counters, sim.logCounts['deadlock-manual'] ?? 0), []);
+    assert.ok(sim.st.counters.exited > 250);
+    console.log(`Phase clearance tee/133042 dt=${dt}: ${sim.st.counters.exited} exited without invalid events.`);
+  } finally { sim.dispose(); }
+}

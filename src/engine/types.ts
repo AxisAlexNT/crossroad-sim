@@ -460,6 +460,8 @@ export interface NewVehicle {
   length: number;
   /** id маршрута для рейсового автобуса */
   route?: string;
+  /** Момент прибытия внутри текущего шага, с. Без него используется конец шага. */
+  at?: number;
 }
 
 export interface SpawnContext {

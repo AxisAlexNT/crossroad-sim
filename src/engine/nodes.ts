@@ -23,30 +23,29 @@ export function nativeSpawn(p: SpawnerParams): SpawnFn {
     return { destination: ctx.pick(dests), kind: type.kind, length: ctx.uniform(type.lengthMin, type.lengthMax) };
   };
   return (ctx) => {
-    const rate = rateAt(ctx.t);
-    if (rate <= 0 || !types.length || !Object.keys(dests).length) return [];
+    if (!types.length || !Object.keys(dests).length) return [];
     const m = ctx.memory as { acc?: number; need?: number };
-    if (p.arrival === 'poisson') {
-      // накопленная интенсивность до следующей машины распределена показательно: моменты появления не зависят от шага
-      if (m.need === undefined) m.need = -Math.log(1 - ctx.random());
-      m.acc = (m.acc ?? 0) + (rate * ctx.dt) / 3600;
-      const out: NewVehicle[] = [];
-      while (m.acc >= m.need) {
-        m.acc -= m.need;
-        m.need = -Math.log(1 - ctx.random());
-        out.push(make(ctx));
+    const out: NewVehicle[] = [];
+    const until = +ctx.t.toFixed(6);
+    let from = +(until - ctx.dt).toFixed(6);
+    while (from < until) {
+      let to = until;
+      for (const x of profile) if (x.from > from && x.from < to) to = x.from;
+      const rate = rateAt(from);
+      if (rate > 0) {
+        if (p.arrival === 'poisson' && m.need === undefined) m.need = -Math.log(1 - ctx.random());
+        m.acc = (m.acc ?? 0) + rate * (to - from) / 3600;
+        const batch = p.arrival === 'platoon' ? Math.max(1, p.platoonSize) : 1;
+        while (m.acc + 1e-12 >= (p.arrival === 'poisson' ? m.need! : batch)) {
+          m.acc = Math.max(0, m.acc - (p.arrival === 'poisson' ? m.need! : batch));
+          const at = +(to - m.acc * 3600 / rate).toFixed(6);
+          if (p.arrival === 'poisson') m.need = -Math.log(1 - ctx.random());
+          for (let i = 0; i < batch; i++) out.push({ ...make(ctx), at });
+        }
       }
-      return out;
+      from = to;
     }
-    m.acc = (m.acc ?? 0) + (rate * ctx.dt) / 3600;
-    const batch = p.arrival === 'platoon' ? Math.max(1, p.platoonSize) : 1;
-    if (m.acc >= batch) {
-      m.acc -= batch;
-      const out: NewVehicle[] = [];
-      for (let i = 0; i < batch; i++) out.push(make(ctx));
-      return out;
-    }
-    return [];
+    return out;
   };
 }
 

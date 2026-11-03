@@ -32,8 +32,8 @@ for (const joiningId of ['S0-W0', 'S0-N0']) {
     const through = sim.net.conns.find(c => c.conn.id === 'E0-W0' && c.variant === 0)!;
     const turn = sim.net.conns.find(c => c.conn.id === 'E0-S0' && c.variant === 0)!;
     const cr = through.conflicts.find(c => c.conflict === 99)!; assert.ok(cr);
-    const follower = { ...structuredClone(base), id: 2131, conn: through.idx, phase: 'conn' as const, origin: 'E', dest: 'W', s: 13.123210245720857, v: 0, a: 0, len: 4.425112426676788, committed: [] };
-    const leader = { ...structuredClone(base), id: 2102, conn: turn.idx, phase: 'conn' as const, origin: 'E', dest: 'S', s: 26.16181938489778, v: 0, a: 0, len: 4.5230287542101, why: 'yield' as const, yieldTo: 10003, committed: [] };
+    const follower: Vehicle = { ...structuredClone(base), id: 2131, conn: through.idx, phase: 'conn', origin: 'E', dest: 'W', s: 13.123210245720857, v: 0, a: 0, len: 4.425112426676788, committed: [] };
+    const leader: Vehicle = { ...structuredClone(base), id: 2102, conn: turn.idx, phase: 'conn', origin: 'E', dest: 'S', s: 26.16181938489778, v: 0, a: 0, len: 4.5230287542101, why: 'yield', yieldTo: 10003, committed: [] };
     const joining = sim.net.conns.find(c => c.conn.id === joiningId && c.variant === 0)!;
     const granting = { ...structuredClone(base), id: 10003, conn: joining.idx, phase: 'conn' as const, s: 1, v: 0, why: 'yield' as const, yieldTo: follower.id, committed: [] as number[] };
     const internal = sim as unknown as { index(): void; siblingFollowing(v: Vehicle, other: Vehicle, until: number): { gap: number; speed: number } | null; wouldStopInside(v: Vehicle, ci: number, cr: typeof through.conflicts[number], offset: number): boolean; mustWait(v: Vehicle, ci: number, cr: typeof through.conflicts[number], start: number, end: number): boolean };
@@ -62,6 +62,27 @@ for (const joiningId of ['S0-W0', 'S0-N0']) {
     sim.restore(structuredClone(sim.st));
     assert.deepEqual(sim.st.vehicles.find(v => v.id === follower.id)!.acceptedGrants, expectedGrant,
       'Snapshot restoration must preserve addressed merge grants');
+
+    // В цепочке между расходящимся лидером и адресной уступкой может быть
+    // ещё одна неподвижная машина, ожидающая освобождения своего направления.
+    follower.s = 13; leader.s = 26;
+    Object.assign(leader, { why: 'merge', whyId: 10005, yieldTo: -1 });
+    const relay: Vehicle = { ...structuredClone(leader), id: 10005, s: leader.s + 7, why: 'yield', yieldTo: granting.id };
+    assert.ok(relay.s < turn.path.length);
+    granting.yieldTo = follower.id; granting.v = 0;
+    follower.committed = []; follower.acceptedGrants = undefined;
+    sim.st.vehicles = [follower, leader, relay, granting];
+    for (const v of sim.st.vehicles) sim.pose(v);
+    internal.index();
+    assert.equal(internal.siblingFollowing(follower, leader, through.path.length), null,
+      'A stationary waiting chain must preserve a clear addressed passage beyond three participants');
+    assert.ok(follower.acceptedGrants && Object.values(follower.acceptedGrants).includes(granting.id));
+    relay.v = 1;
+    assert.notEqual(internal.siblingFollowing(follower, leader, through.path.length), null,
+      'A moving relay cannot be treated as stationary consent');
+    relay.v = 0; relay.yieldTo = leader.id;
+    assert.notEqual(internal.siblingFollowing(follower, leader, through.path.length), null,
+      'A cycle without an addressed grant to the recipient must terminate without releasing passage');
   } finally { sim.dispose(); }
 }
 

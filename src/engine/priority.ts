@@ -1,6 +1,9 @@
 /** Приоритет не отменяет проверку физически свободного пространства. */
+import { compareArrivalOrder, type DemandId } from './demand';
 export interface PriorityParticipant {
   id: number;
+  tWanted?: number;
+  demand?: DemandId;
   arm: string;
   left: boolean;
   illegal: boolean;
@@ -18,5 +21,5 @@ export function decidePriority(a: PriorityParticipant, b: PriorityParticipant, o
   if (a.left !== b.left && (opposite[a.arm] === b.arm || opposite[b.arm] === a.arm)) return { yields: a.left, reason: 'opposite-left' };
   const ar = right[a.arm] === b.arm, br = right[b.arm] === a.arm;
   if (ar !== br) return { yields: ar, reason: 'right' };
-  return { yields: a.id > b.id, reason: 'tie' };
+  return { yields: compareArrivalOrder(a, b) > 0, reason: 'tie' };
 }

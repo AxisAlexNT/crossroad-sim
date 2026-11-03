@@ -3,7 +3,7 @@
 
 import type { ExitParams, LaneChooserParams, SignalProgram, SpawnerParams } from './types';
 
-const num = (x: number) => (Number.isInteger(x) ? String(x) : String(+x.toFixed(4)));
+const num = (x: number) => String(x);
 const key = (k: string) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k));
 
 export function genSpawnerCode(armLabel: string, p: SpawnerParams): string {
@@ -54,29 +54,30 @@ function makeVehicle(ctx: SpawnContext): NewVehicle {
 }
 
 export function spawn(ctx: SpawnContext): NewVehicle[] {
-  const rate = rateAt(ctx.t);
-  if (rate <= 0) return [];
+  if (!TYPES.length || !Object.keys(DESTINATIONS).length) return [];
   const m = ctx.memory as { acc?: number; need?: number };
-  if (ARRIVAL === 'poisson') {
-    // накопленная интенсивность до следующей машины — случайная величина с показательным распределением.
-    // Моменты появления не зависят от шага симуляции, а профиль интенсивности учитывается точно
-    if (m.need === undefined) m.need = -Math.log(1 - ctx.random());
-    m.acc = (m.acc ?? 0) + (rate * ctx.dt) / 3600;
-    const out: NewVehicle[] = [];
-    while (m.acc >= m.need) {
-      m.acc -= m.need;
-      m.need = -Math.log(1 - ctx.random());
-      out.push(makeVehicle(ctx));
+  const out: NewVehicle[] = [];
+  const until = +ctx.t.toFixed(6);
+  let from = +(until - ctx.dt).toFixed(6);
+  // Интегрируем профиль по частям и сохраняем момент каждого события.
+  while (from < until) {
+    let to = until;
+    for (const x of PROFILE) if (x.from > from && x.from < to) to = x.from;
+    const rate = rateAt(from);
+    if (rate > 0) {
+      if (ARRIVAL === 'poisson' && m.need === undefined) m.need = -Math.log(1 - ctx.random());
+      m.acc = (m.acc ?? 0) + rate * (to - from) / 3600;
+      const batch = ARRIVAL === 'platoon' ? Math.max(1, PLATOON_SIZE) : 1;
+      while (m.acc + 1e-12 >= (ARRIVAL === 'poisson' ? m.need! : batch)) {
+        m.acc = Math.max(0, m.acc - (ARRIVAL === 'poisson' ? m.need! : batch));
+        const at = +(to - m.acc * 3600 / rate).toFixed(6);
+        if (ARRIVAL === 'poisson') m.need = -Math.log(1 - ctx.random());
+        for (let i = 0; i < batch; i++) out.push({ ...makeVehicle(ctx), at });
+      }
     }
-    return out;
+    from = to;
   }
-  m.acc = (m.acc ?? 0) + (rate * ctx.dt) / 3600;
-  const batch = ARRIVAL === 'platoon' ? Math.max(1, PLATOON_SIZE) : 1;
-  if (m.acc >= batch) {
-    m.acc -= batch;
-    return Array.from({ length: batch }, () => makeVehicle(ctx));
-  }
-  return [];
+  return out;
 }
 `;
 }

@@ -7,6 +7,7 @@ import { invalidRunReasons } from '../src/engine/runValidity';
 import { meanCi } from '../src/engine/optimizer';
 import { ENGINE_VERSION } from '../src/engine/version';
 import type { ModelConfig } from '../src/engine/types';
+import type { DemandEvent } from '../src/engine/demand';
 
 const horizon = Number(process.argv[2] ?? 1200);
 const count = Number(process.argv[3] ?? 10);
@@ -18,7 +19,9 @@ const steps = process.argv[6] ? process.argv[6].split(',').map(Number) : [.2, .1
 if (steps.length !== 3 || steps.some((dt, i) => !Number.isFinite(dt) || dt < .02 || dt > .5 || (i > 0 && dt >= steps[i - 1]))) {
   throw new Error('Нужны три строго убывающих шага от 0,02 до 0,5 с, разделённые запятыми.');
 }
-const seeds = Array.from({ length: count }, (_, i) => 42 + i * 1000);
+const seedBase = Number(process.argv[7] ?? 42);
+if (!Number.isInteger(seedBase) || seedBase < 0 || seedBase + (count - 1) * 1000 > 2147483647) throw new Error('Начальное зерно и вся последовательность должны быть целыми от 0 до 2147483647.');
+const seeds = Array.from({ length: count }, (_, i) => seedBase + i * 1000);
 // Заранее выбранные инженерные допуски, а не результат подгонки к прогонам.
 const metrics = [
   { key: 'throughputVph', absolute: 5, relative: .05 },
@@ -36,7 +39,7 @@ if (!picked.length) throw new Error('Не найдена модель для п�
 const engineDir = new URL('../src/engine/', import.meta.url);
 const hash = createHash('sha256');
 for (const file of readdirSync(engineDir).filter(f => f.endsWith('.ts')).sort()) hash.update(file).update(readFileSync(new URL(file, engineDir)));
-interface Run { seed: number; dt: number; summary?: Summary; vehicles?: number; pedestrians?: number; invalid: string[] }
+interface Run { seed: number; dt: number; summary?: Summary; vehicles?: number; pedestrians?: number; inputDigest?: string; inputSources?: Record<string, number>; invalid: string[] }
 const report = {
   format: 'crossroad-convergence', version: 1, engineVersion: ENGINE_VERSION, engineHash: hash.digest('hex'),
   started: new Date().toISOString(), warmup, horizon, steps, seeds, tolerances: metrics,
@@ -58,7 +61,14 @@ for (const [label, make] of picked) {
       try {
         const compiled = compileModel(model);
         if (compiled.errors.length) throw new Error(compiled.errors.join('\n'));
-        sim = new Simulation(model, compiled.code, { headless: true, dt });
+        const inputs = new Map<string, { hash: ReturnType<typeof createHash>; count: number }>();
+        const onDemand = (event: DemandEvent) => {
+          let source = inputs.get(event.source);
+          if (!source) { source = { hash: createHash('sha256'), count: 0 }; inputs.set(event.source, source); }
+          source.hash.update(JSON.stringify([event.serial, event.at, event.attributes])).update('\n');
+          source.count++;
+        };
+        sim = new Simulation(model, compiled.code, { headless: true, dt, onDemand });
         sim.runUntil(warmup);
         const warm = { t: sim.st.t, counters: structuredClone(sim.st.counters) };
         sim.st.maxQueue = 0;
@@ -66,6 +76,9 @@ for (const [label, make] of picked) {
         run.summary = sim.summary(warm);
         run.vehicles = sim.st.counters.spawned + Object.values(sim.st.queue).reduce((n, q) => n + q.length, 0) + sim.st.counters.dropped;
         run.pedestrians = sim.st.counters.pedSpawned + sim.st.counters.pedDropped;
+        const sources = [...inputs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+        run.inputSources = Object.fromEntries(sources.map(([key, value]) => [key, value.count]));
+        run.inputDigest = createHash('sha256').update(JSON.stringify(sources.map(([key, value]) => [key, value.hash.digest('hex')]))).digest('hex');
         run.invalid = invalidRunReasons(sim.st.counters, sim.logCounts['deadlock-manual'] ?? 0, model.sim.diagnosticRecovery);
         if (metrics.some(m => !Number.isFinite(run.summary![m.key]))) run.invalid.push('нечисловые показатели');
       } catch (error) { run.invalid.push(error instanceof Error ? error.message : String(error)); }
@@ -75,6 +88,7 @@ for (const [label, make] of picked) {
     }
     const paired = result.runs.filter(r => r.seed === seed);
     if (paired.some(r => r.vehicles !== paired[0].vehicles || r.pedestrians !== paired[0].pedestrians)) result.failures.push(`seed=${seed}: различаются количества входного спроса`);
+    if (paired.some(r => r.inputDigest !== paired[0].inputDigest)) result.failures.push(`seed=${seed}: различаются моменты или свойства входного спроса`);
     console.log(`${label}, seed=${seed}: ${paired.map(r => `${r.dt}: ${r.invalid.length ? r.invalid.join(', ') : 'пригоден'}`).join(' | ')}`);
   }
   // Непригодные повторы не удаляются из выборки ради успешного сравнения.

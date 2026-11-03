@@ -2,6 +2,7 @@ import type { InteractiveFrame } from './interactiveRuntime';
 import { timeLoss } from './metrics';
 import { travelDistance } from './kinematics';
 import { decidePriority } from './priority';
+import { compareArrivalOrder, type DemandId, type DemandEvent } from './demand';
 // Микросимуляция перекрёстка.
 // Машины движутся по траекториям по модели следования за лидером IDM, светофор работает по программе.
 // Машины уступают друг другу по ПДД (13.4, 13.5 и 6.3, 13.8, помеха справа) с учётом обзора:
@@ -42,6 +43,7 @@ export interface Vehicle {
   /** Кто из соседней полосы пропускает эту машину, номер или -1 */
   lcHelper: number;
   id: number;
+  demand?: DemandId;
   kind: VehicleKind;
   len: number;
   wid: number;
@@ -251,12 +253,13 @@ export interface SimState {
   streams: Record<string, RngState>;
   /** Накопленная интенсивность и порог до следующего появления для автобусов и пешеходов */
   arrivals: Record<string, { acc: number; need: number }>;
+  demandSerials?: Record<string, number>;
   nextVid: number;
   nextPid: number;
   nextCrash: number;
   vehicles: Vehicle[];
   peds: PedAgent[];
-  queue: Record<ArmId, Array<{ nv: NewVehicle; t: number; rs: number }>>;
+  queue: Record<ArmId, Array<{ nv: NewVehicle; t: number; rs: number; demand?: DemandId }>>;
   sig: SignalRuntime;
   lamps: Record<string, Lamp>;
   lampSig: string;
@@ -448,17 +451,20 @@ export class Simulation {
   /** Кто заставил уступить при последней проверке mustWait */
   private blocker = -1;
   private connLists: Vehicle[][] = [];
+  private vehicleById = new Map<number, Vehicle>();
   private exitLists: Record<ArmId, Vehicle[][]> = {};
   private pedsByEdge: PedAgent[][] = [];
   private lateSight = false;
   private yieldClearance = new Map<string, number>();
   private bodyPairs = new Map<string, boolean>();
   private bodySweeps = new Map<string, OBB[]>();
+  private onDemand?: (event: DemandEvent) => void;
   headless = false;
 
-  constructor(cfg: ModelConfig, code: CompiledCode, opts: { headless?: boolean; dt?: number } = {}) {
+  constructor(cfg: ModelConfig, code: CompiledCode, opts: { headless?: boolean; dt?: number; onDemand?: (event: DemandEvent) => void } = {}) {
     this.cfg = cfg;
     this.headless = !!opts.headless;
+    this.onDemand = opts.onDemand;
     this.dt = opts.dt ?? cfg.sim.dt;
     this.net = buildNetwork(cfg);
     this.rel = armRelations(cfg.arms);
@@ -588,7 +594,7 @@ export class Simulation {
       mem.exits[d] = {};
     }
     return {
-      t: 0, tick: 0, rng: seedRng(this.cfg.sim.seed), streams: {}, arrivals: {}, nextVid: 1, nextPid: 1, nextCrash: 1,
+      t: 0, tick: 0, rng: seedRng(this.cfg.sim.seed), streams: {}, arrivals: {}, demandSerials: {}, nextVid: 1, nextPid: 1, nextCrash: 1,
       vehicles: [], peds: [], queue,
       sig: initSignal(this.cfg.signals), lamps: {}, lampSig: '', lastLampChange: 0,
       permitEnd: this.net.conns.map(() => -1e9),
@@ -636,19 +642,19 @@ export class Simulation {
    * Появления по пуассоновскому потоку: накопленная интенсивность до следующего события распределена
    * показательно. Моменты не зависят от шага симуляции, на одно событие уходит одно случайное число
    */
-  private poissonArrivals(key: string, perHour: number): number {
-    if (perHour <= 0) return 0;
+  private poissonArrivals(key: string, perHour: number): number[] {
+    if (perHour <= 0) return [];
     const st = this.st;
     const r = this.stream('arr:' + key);
     const a = (st.arrivals[key] ??= { acc: 0, need: -Math.log(1 - rngNext(r)) });
     a.acc += (perHour * this.dt) / 3600;
-    let n = 0;
-    while (a.acc >= a.need && n < 50) {
-      a.acc -= a.need;
+    const times: number[] = [];
+    while (a.acc + 1e-12 >= a.need && times.length < 50) {
+      a.acc = Math.max(0, a.acc - a.need);
+      times.push(+(st.t - a.acc * 3600 / perHour).toFixed(6));
       a.need = -Math.log(1 - rngNext(r));
-      n++;
     }
-    return n;
+    return times;
   }
 
   // ---------------- Светофор ----------------
@@ -765,6 +771,33 @@ export class Simulation {
     };
   }
 
+  private nextDemand(source: string): DemandId {
+    const st = this.st;
+    const serials = (st.demandSerials ??= {});
+    return { source, serial: serials[source] = (serials[source] ?? 0) + 1 };
+  }
+
+  private enqueueDemand(arm: ArmId, nv: NewVehicle, rs: number, source: string) {
+    const st = this.st, q = st.queue[arm];
+    const demand = this.nextDemand(source);
+    const from = +(st.t - this.dt).toFixed(6);
+    const t = Number.isFinite(nv.at) ? Math.max(from, Math.min(st.t, nv.at!)) : st.t;
+    this.onDemand?.({ ...demand, at: t, attributes: [arm, nv.destination, nv.kind, nv.length, nv.route ?? null, rs] });
+    if (q.length >= MAX_VIRTUAL_QUEUE) {
+      st.counters.dropped++;
+      if (st.counters.dropped === 1 || st.counters.dropped % 500 === 0) {
+        this.addLog('warn', 'overflow', `Очередь за пределами модели на подходе «${this.armName(arm)}» превысила ${MAX_VIRTUAL_QUEUE} машин: спрос больше пропускной способности. Новые машины не добавляются, всего отброшено ${st.counters.dropped}.`);
+      }
+      return;
+    }
+    const item = { nv, t, rs, demand };
+    // Старый хвост уже упорядочен. Переставлять нужно лишь новые события
+    // автобусов и обычных источников, попавшие в один шаг.
+    let i = q.length;
+    while (i > 0 && compareArrivalOrder({ id: 0, tWanted: q[i - 1].t, demand: q[i - 1].demand }, { id: 0, tWanted: t, demand }) > 0) i--;
+    q.splice(i, 0, item);
+  }
+
   private laneInfos(arm: ArmId): LaneInfo[] {
     const lists = this.laneLists[arm] ?? [];
     return this.net.reachable[arm].map((reach, i) => ({
@@ -780,11 +813,11 @@ export class Simulation {
     const st = this.st;
     for (const r of tr.routes) {
       if (!r.enabled || r.perHour <= 0 || !st.queue[r.from] || !this.armList.includes(r.to)) continue;
-      const n = this.poissonArrivals('bus:' + r.id, r.perHour);
-      for (let i = 0; i < n; i++) {
+      const times = this.poissonArrivals('bus:' + r.id, r.perHour);
+      for (const at of times) {
         const rs = rngSeedFrom(this.stream('busveh:' + r.id));
         if (!this.net.reachableBus[r.from]?.some((x) => x.includes(r.to))) continue;
-        st.queue[r.from].push({ nv: { destination: r.to, kind: 'bus', length: r.length, route: r.id }, t: st.t, rs });
+        this.enqueueDemand(r.from, { destination: r.to, kind: 'bus', length: r.length, route: r.id, at }, rs, 'bus:' + r.id);
         st.counters.busSpawned++;
       }
     }
@@ -812,14 +845,7 @@ export class Simulation {
               this.addLog('error', 'route', `С подхода «${this.armName(arm)}» нельзя проехать на «${this.armName(nv.destination)}»: ни одна полоса не связана с этим выездом. Машина не создана.`);
               continue;
             }
-            if (st.queue[arm].length >= MAX_VIRTUAL_QUEUE) {
-              st.counters.dropped++;
-              if (st.counters.dropped === 1 || st.counters.dropped % 500 === 0) {
-                this.addLog('warn', 'overflow', `Очередь за пределами модели на подходе «${this.armName(arm)}» превысила ${MAX_VIRTUAL_QUEUE} машин: спрос больше пропускной способности. Новые машины не добавляются, всего отброшено ${st.counters.dropped}.`);
-              }
-              continue;
-            }
-            st.queue[arm].push({ nv: { ...nv, length: Math.max(3, Math.min(20, nv.length || 4.5)) }, t: st.t, rs });
+            this.enqueueDemand(arm, { ...nv, length: Math.max(3, Math.min(20, nv.length || 4.5)) }, rs, 'car:' + arm);
           }
         } catch (e) {
           this.addLog('error', 'code', `Ошибка в spawn(), подход «${this.armName(arm)}»`, e instanceof Error ? e.message : String(e));
@@ -835,7 +861,7 @@ export class Simulation {
     const g = this.net.arms[arm];
     const q = st.queue[arm];
     let guard = 0;
-    while (q.length > 0 && guard++ < 4) {
+    while (q.length > 0 && guard++ < Math.max(4, g.cfg.inLanes)) {
       const item = q[0];
       const nv = item.nv;
       // генератор этой машины: при повторной попытке вставки те же случайные числа
@@ -899,6 +925,7 @@ export class Simulation {
         lane = alt;
       }
       q.shift();
+      const entered = Math.min(st.t, Math.max(+(st.t - this.dt).toFixed(6), item.t));
       const kind = nv.kind;
       const truck = kind === 'truck' || kind === 'bus';
       const v0 = g.cfg.speedLimit / 3.6;
@@ -913,12 +940,12 @@ export class Simulation {
       const reaction = pick(sd?.reaction, dr.reactionMin, dr.reactionMax);
       const lastInLane = (lists?.[lane] ?? [])[0];
       const veh: Vehicle = {
-        id: st.nextVid++, kind, len: nv.length, wid: VEH_WIDTH[kind] ?? 1.8, origin: arm, dest: nv.destination,
+        id: st.nextVid++, demand: item.demand, kind, len: nv.length, wid: VEH_WIDTH[kind] ?? 1.8, origin: arm, dest: nv.destination,
         phase: 'approach', lane, targetLane: target, lcFrom: lane, lcT: -1, conn: -1, outLane: 0, s: 0, ps: 0,
         v: lastInLane && lastInLane.s < 60 ? Math.min(lastInLane.v, v0 * 0.9) : v0 * 0.9, a: 0,
         amax: truck ? dr.heavyAccel : accel, bcomf: truck ? 2.0 : 2.5,
         T: truck ? headway + 0.2 : headway,
-        s0: gap, v0f: speedF, reaction, goSince: -1, haltT: -1, tWanted: item.t, tEnter: st.t, tStop: -1, stopTime: st.t - item.t,
+        s0: gap, v0f: speedF, reaction, goSince: -1, haltT: -1, tWanted: item.t, tEnter: entered, tStop: -1, stopTime: entered - item.t,
         risky: false, viol: { solid: false, stop: false, red: false, turn: false }, overStopDist: 0, overStop: false, solidCross: false, illegal: false,
         origDest: null, lcWaitSince: -1, error: null, wrongLane: wrong, committed: [],
         rng: vr, lat: rngNext(vr) * 2 - 1, lat2: rngNext(vr) * 2 - 1, shiftNow: 0, lcYield: -1, lcYieldUntil: 0, lcHelper: -1, route: nv.route ?? null, stopsLeft: route ? route.stops.filter((id) => !!this.stopById(id)) : [], dwellUntil: -1, inBay: false, bayT: 0, bayShift: 0,
@@ -972,14 +999,15 @@ export class Simulation {
       if (!cfg || cfg.rate <= 0) continue;
       const meanSize = cfg.groups.reduce((a, g) => a + g.size * g.share, 0) / Math.max(1e-9, cfg.groups.reduce((a, g) => a + g.share, 0)) || 1;
       const key = `ped:${src.nodeId}:${src.cfgIdx}`;
-      const n = this.poissonArrivals(key, cfg.rate / meanSize);
-      for (let i = 0; i < n; i++) this.spawnPedGroup(src, cfg, seedRng(rngSeedFrom(this.stream('attr:' + key))));
+      const times = this.poissonArrivals(key, cfg.rate / meanSize);
+      for (const at of times) this.spawnPedGroup(src, cfg, seedRng(rngSeedFrom(this.stream('attr:' + key))), at);
     }
   }
 
   /** Новая группа пешеходов у источника. Все её случайные свойства — из собственного генератора */
-  private spawnPedGroup(src: { node: number; nodeId: string; cfgIdx: number }, cfg: PedSource, pr: RngState) {
+  private spawnPedGroup(src: { node: number; nodeId: string; cfgIdx: number }, cfg: PedSource, pr: RngState, at = this.st.t) {
     const st = this.st;
+    const demand = this.nextDemand(`ped:${src.nodeId}:${src.cfgIdx}`);
     const dests = Object.entries(cfg.destinations).filter(([k, w]) => w > 0 && k !== src.nodeId && this.net.pedNodeById.has(k));
     if (!dests.length) return;
     const dest = pickWeighted(pr, dests);
@@ -998,6 +1026,7 @@ export class Simulation {
     const size = cfg.groups.length ? pickWeighted(pr, cfg.groups.map((g) => [g.size, g.share] as [number, number])) : 1;
     const base = cfg.speedMin + (cfg.speedMax - cfg.speedMin) * rngNext(pr);
     const speed = base * (size >= 3 ? 0.85 : size === 2 ? 0.95 : 1);
+    this.onDemand?.({ ...demand, at, attributes: [src.nodeId, dest, size, speed] });
     if (st.peds.length >= MAX_PEDS) {
       if (st.counters.pedDropped === 0) this.addLog('error', 'ped-capacity', 'Достигнут предел числа пешеходных групп. Часть входного спроса не размещена; прогон непригоден для сравнения.');
       st.counters.pedDropped += size;
@@ -1005,7 +1034,7 @@ export class Simulation {
     }
     const p: PedAgent = {
       id: st.nextPid++, size, speed, origin: src.nodeId, dest, route, leg: 0, w: 0, waiting: false, waitTime: 0, blocked: 0,
-      tSpawn: st.t, hit: false, hitUntil: 0, danger: -1e9, x: 0, y: 0, h: 0, px: 0, py: 0,
+      tSpawn: at, hit: false, hitUntil: 0, danger: -1e9, x: 0, y: 0, h: 0, px: 0, py: 0,
     };
     this.pedPose(p);
     p.px = p.x; p.py = p.y;
@@ -1052,9 +1081,9 @@ export class Simulation {
 
   private updatePeds() {
     const st = this.st;
-    const dt = this.dt;
     const done: PedAgent[] = [];
     for (const p of st.peds) {
+      const dt = Math.max(0, Math.min(this.dt, st.t - p.tSpawn));
       p.px = p.x; p.py = p.y;
       if (p.hit) continue;
       const r = p.route[p.leg];
@@ -1148,6 +1177,7 @@ export class Simulation {
 
   private index() {
     const st = this.st;
+    this.vehicleById.clear();
     for (const d of this.armList) {
       this.laneLists[d] = Array.from({ length: this.net.arms[d].cfg.inLanes }, () => []);
       this.exitLists[d] = Array.from({ length: this.net.arms[d].cfg.outLanes }, () => []);
@@ -1155,6 +1185,7 @@ export class Simulation {
     this.connLists = this.net.conns.map(() => []);
     this.bayReady = {};
     for (const v of st.vehicles) {
+      this.vehicleById.set(v.id, v);
       // автобус, заехавший в карман, не занимает полосу, пока не начнёт выезжать.
       // Когда он готов выехать, едущие сзади его пропускают (ПДД 18.3)
       if (v.inBay && v.bayT >= 0.75) {
@@ -1194,7 +1225,7 @@ export class Simulation {
       // на широкой полосе у стоп-линии машины в разных рядах стоят рядом и друг другу не мешают
       if (veh.phase === 'approach' && o.phase === 'approach' && Math.abs(o.shiftNow - veh.shiftNow) >= (o.wid + veh.wid) / 2 + 0.45 && this.net.arms[veh.origin].cfg.laneWidth >= TWO_ROW_WIDTH) continue;
       // строгий порядок по положению, при равенстве — по номеру: две машины не могут быть лидерами друг друга
-      if (o.s > veh.s || (o.s === veh.s && o.id < veh.id)) {
+      if (o.s > veh.s || (o.s === veh.s && compareArrivalOrder(o, veh) < 0)) {
         if (!best || o.s < best.s) best = o;
       }
     }
@@ -1220,7 +1251,13 @@ export class Simulation {
     return tAcc + (d - dAcc) / vcap;
   }
 
-  /** Следующая остановка автобуса — на выезде к подходу назначения: нужна полоса у бордюра */
+  /** Стоящий участник может тронуться; известная стоянка задаёт конечную задержку. */
+  private approachTime(veh: Vehicle, distance: number): number {
+    const dwell = Math.max(0, veh.dwellUntil - this.st.t);
+    const speed = this.net.arms[veh.origin].cfg.speedLimit / 3.6 * veh.v0f;
+    return dwell + this.timeToCover(distance, veh.v, Math.max(0.1, veh.amax), Math.max(veh.v, speed));
+  }
+
   /** Из этой полосы подхода автобус доедет до своей остановки: к остановке на выезде — только из полосы, связанной с полосой у бордюра */
   private busLaneOk(veh: Vehicle, lane: number): boolean {
     if (!veh.route || !this.busNeedsCurbExit(veh.route, veh.stopsLeft, veh.dest)) return true;
@@ -1372,7 +1409,7 @@ export class Simulation {
       if (meIn && otherIn && veh.tStop !== o.tStop) return veh.tStop > o.tStop;
     }
     const participant = (v: Vehicle, ci: number) => ({
-      id: v.id, arm: this.net.conns[ci].conn.from.arm, left: this.isTurnLeft(ci),
+      id: v.id, demand: v.demand, tWanted: v.tWanted, arm: this.net.conns[ci].conn.from.arm, left: this.isTurnLeft(ci),
       illegal: !!this.net.conns[ci].illegal,
       clearing: v.phase === 'conn' && this.permit[ci] === 'none',
       arrow: (this.permit[ci] !== 'none' ? this.permit[ci] : v.entryPermit) === 'arrow',
@@ -1444,7 +1481,7 @@ export class Simulation {
       for (const o of this.connLists[B]) {
       if (cf.body && !this.bodyConflictApplies(veh, A, o, B)) continue;
         if (o === veh || o.s - o.len >= bEnd) continue;
-        const earlier = veh.phase !== 'conn' || o.tStop < veh.tStop || (o.tStop === veh.tStop && o.id < veh.id);
+        const earlier = veh.phase !== 'conn' || o.tStop < veh.tStop || (o.tStop === veh.tStop && compareArrivalOrder(o, veh) < 0);
         if (earlier && (o.committed.includes(cr.conflict) || o.s >= bStart)) { this.blocker = o.id; return true; }
       }
     }
@@ -1454,7 +1491,7 @@ export class Simulation {
       const from = this.net.conns[B].conn.from;
       for (const o of this.laneLists[from.arm]?.[from.lane] ?? []) {
         if (veh.phase === 'approach' && o !== veh && o.conn === B
-          && (o.s > veh.s + .01 || (Math.abs(o.s - veh.s) <= .01 && o.id < veh.id))) {
+          && (o.s > veh.s + .01 || (Math.abs(o.s - veh.s) <= .01 && compareArrivalOrder(o, veh) < 0))) {
           this.blocker = o.id;
           return true;
         }
@@ -1478,7 +1515,7 @@ export class Simulation {
         // Остановившийся до сужения участник не резервирует весь выезд.
         // При возобновлении движения занятость зоны проверяется заново.
         if (cf.kind === 'merge' && o.v < 0.3 && o.s < bStart - 4 && !o.committed.includes(cr.conflict)) continue;
-        if (veh.phase === 'conn' && (o.tStop > veh.tStop || (o.tStop === veh.tStop && o.id > veh.id))) continue;
+        if (veh.phase === 'conn' && (o.tStop > veh.tStop || (o.tStop === veh.tStop && compareArrivalOrder(o, veh) > 0))) continue;
         this.blocker = o.id;
         return true;
       }
@@ -1541,10 +1578,12 @@ export class Simulation {
       if (this.acceptSiblingGrant(veh, A, o)) continue;
       const dB = bStart - o.s;
       if (!sees(Math.max(0, dB))) continue;
+      const completing = o.phase === 'conn' && this.permit[B] === 'none'
+        && !(veh.phase === 'conn' && this.permit[A] === 'none') && this.yieldsTo(veh, A, o, B);
       if (o.s > bStart) {
         // Зона — консервативная оболочка двух траекторий. Стоящий участник
         // может уже освободить наш коридор, оставаясь внутри этой оболочки.
-        if (o.v < 0.3 && o.a < 0.2 && !this.sweepHits(veh, A, cr.start, cr.end + veh.len, o)) continue;
+        if (!completing && o.v < 0.3 && o.a < 0.2 && !this.sweepHits(veh, A, cr.start, cr.end + veh.len, o)) continue;
         if (occl) this.lateSight = true;
         this.blocker = o.id;
         return true;
@@ -1552,7 +1591,7 @@ export class Simulation {
       // Уступка адресована конкретной машине: ожидание третьего участника
       // или свободного места не передаёт приоритет всему встречному потоку.
       const givesWay = o.yieldingAt === cf.id && o.yieldTo === veh.id && o.v < 0.5
-        && (veh.yieldingAt !== cf.id || (veh.yieldTo === o.id && veh.v < 0.5 && veh.id < o.id));
+        && (veh.yieldingAt !== cf.id || (veh.yieldTo === o.id && veh.v < 0.5 && compareArrivalOrder(veh, o) < 0));
       if (givesWay) {
         // Адресная уступка передаёт право проезда. Старый резерв уступившего
         // больше не позволяет ему тронуться перед принявшей уступку машиной.
@@ -1581,18 +1620,23 @@ export class Simulation {
       }
       // ПДД 13.8: тем, кто завершает манёвр после смены сигнала, уступаем, даже если они сейчас стоят.
       // Иначе въехавшие на новый сигнал перекрывают им путь и перекрёсток запирается целиком
-      if (o.phase === 'conn' && this.permit[B] === 'none'
-        && !(veh.phase === 'conn' && this.permit[A] === 'none') && this.yieldsTo(veh, A, o, B)) {
+      if (completing) {
         this.blocker = o.id;
         return true;
       }
       const held = o.v < 0.3 && o.a < 0.2;
       // стоящая у самой зоны машина может задевать траекторию кузовом: проверяем по габаритам
       if (held && o.s > bStart - 4 && this.sweepHits(veh, A, cr.start, cr.end + veh.len, o)) { this.blocker = o.id; return true; }
-      const eta = held ? Infinity : this.timeToCover(dB, o.v, 1.5, Math.max(o.v, 9));
+      const eta = this.approachTime(o, dB);
       if (this.yieldsTo(veh, A, o, B)) {
         if (eta < Math.max(crit, myClear + 1.0)) { this.blocker = o.id; return true; }
       } else if (eta < myArrive + 0.8 && o.phase === 'conn' && o.v > 2) {
+        // Адресно уступающий водитель может ещё двигаться. Если он уже
+        // тормозит до зоны, приоритетная машина не должна тормозить в ответ
+        // только из-за ETA, вычисленного с ускорением уступающей машины.
+        const brakingYield = o.yieldingAt === cf.id && o.yieldTo === veh.id && o.a < 0
+          && dB > o.v * o.v / (-2 * o.a) + 0.3;
+        if (brakingYield) continue;
         if (occl) this.lateSight = true;
         this.blocker = o.id;
         return true;
@@ -1620,29 +1664,39 @@ export class Simulation {
         if (o.v > 3 && L - o.s < (o.v * o.v) / (2 * 4.0) + 1 && this.timeToCover(dB, o.v, 1.5, Math.max(o.v, 9)) < myClear + 1.0) { this.blocker = o.id; return true; }
         continue;
       }
-      const eta = this.timeToCover(dB, o.v, 1.5, Math.max(o.v, 9));
+      const eta = this.approachTime(o, dB);
       if (eta < Math.max(crit, myClear + 1.0)) { this.blocker = o.id; return true; }
     }
     return false;
   }
 
   private acceptSiblingGrant(veh: Vehicle, ci: number, other: Vehicle): boolean {
-    if (other.v >= 0.5 || other.why !== 'yield' || other.conn < 0) return false;
+    if (other.v >= 0.5 || other.crashed || other.conn < 0) return false;
     const c = this.net.conns[ci], b = this.net.conns[other.conn];
     if (c.conn.from.arm !== b.conn.from.arm || c.conn.from.lane !== b.conn.from.lane) return false;
     const position = veh.phase === 'approach' ? veh.s - this.net.arms[veh.origin].cfg.approachLength : veh.s;
-    const granting = this.st.vehicles.find(v => v.id === other.yieldTo);
-    if (!granting || granting.v >= 0.5 || granting.why !== 'yield' || granting.yieldTo !== veh.id) return false;
+    // Следуем по неподвижной цепочке ожидания до адресной уступки нам.
+    // Повторный номер прекращает обход, не создавая разрешения из цикла.
+    const chain = [other], visited = new Set([veh.id, other.id]);
+    let granting = other;
+    for (;;) {
+      const target = granting.why === 'yield' ? granting.yieldTo
+        : granting.why === 'leader' || granting.why === 'merge' ? granting.whyId : -1;
+      const next = this.vehicleById.get(target);
+      if (!next || next.crashed || next.v >= 0.5 || visited.has(next.id)) return false;
+      chain.push(next); visited.add(next.id);
+      granting = next;
+      if (granting.why === 'yield' && granting.yieldTo === veh.id) break;
+    }
     for (const variant of this.net.conns) {
       if (variant.conn.id !== c.conn.id) continue;
       const scale = c.path.length / variant.path.length;
       if (this.connLists[variant.idx].some(o => o !== veh && o.v < 0.5 && o.s * scale > position)) return false;
     }
-    if (this.firstHit(veh, ci, Math.max(0, position), c.path.length + veh.len, other) < Infinity) return false;
+    if (chain.some(o => this.firstHit(veh, ci, Math.max(0, position), c.path.length + veh.len, o) < Infinity)) return false;
     // Принятая адресная уступка сохраняет очередность проезда зоны,
     // даже когда принявший уступку водитель сменит состояние на «движется».
-    if (granting.phase === 'conn' && granting.conn >= 0
-      && this.firstHit(veh, ci, Math.max(0, position), c.path.length + veh.len, granting) === Infinity) {
+    if (granting.phase === 'conn' && granting.conn >= 0) {
       for (const ref of c.conflicts) {
         const zone = this.net.conflicts[ref.conflict];
         if (ref.other !== granting.conn || zone.same) continue;
@@ -2204,6 +2258,7 @@ export class Simulation {
             const end = cr.side === 'a' ? cf.bEnd : cf.aEnd;
             const active = this.connLists[cr.other].concat((this.laneLists[from.arm]?.[from.lane] ?? []).filter(o => o.conn === cr.other));
             const other = active.find(o => !o.crashed && o.v > 0.5 && o.committed.includes(cr.conflict)
+              && (!cf.body || this.bodyConflictApplies(veh, veh.conn, o, cr.other))
               && (o.phase === 'approach' || o.s - o.len < end));
             if (other) {
               this.blocker = other.id;
@@ -2521,14 +2576,15 @@ export class Simulation {
     st.tick++;
     this.updateSignals();
     this.index();
-    // Уже ожидавшие во внешней очереди провели в ней предыдущий шаг.
+    this.spawnAll();
+    // Размещённые в начале интервала уже учли ожидание в предыдущих шагах.
+    // Оставшиеся снаружи ждут лишь после фактического момента прибытия.
     for (const arm of this.armList) {
-      const wait = st.queue[arm].length * dt;
+      const wait = st.queue[arm].reduce((sum, item) => sum + Math.max(0, st.t - Math.max(st.t - dt, item.t)), 0);
       st.counters.waitArea += wait;
       st.counters.delayArea += wait;
       st.counters.waitAreaBy[arm] = (st.counters.waitAreaBy[arm] ?? 0) + wait;
     }
-    this.spawnAll();
     this.spawnPeds();
     this.updatePeds();
     this.index();
@@ -2538,6 +2594,7 @@ export class Simulation {
 
     const removed = new Set<Vehicle>();
     for (const veh of st.vehicles) {
+      const dt = Math.max(0, Math.min(this.dt, st.t - veh.tEnter));
       veh.px = veh.x; veh.py = veh.y; veh.ph = veh.h;
       veh.ps = veh.s;
       if (veh.crashed) { veh.v = 0; continue; }
