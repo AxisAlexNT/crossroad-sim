@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { defaultModel, PRESETS, TEMPLATES } from '../src/engine/presets';
+import { compileModel } from '../src/engine/compile';
+import { migrateSession, serializeSession } from '../src/engine/session';
+const cfg = defaultModel('worked');
+assert.equal(cfg.name, 'Проработанная модель');
+assert.ok(PRESETS.some(p => p.id === 'worked'));
+assert.ok(TEMPLATES.some(p => p.id === 'worked'));
+assert.deepEqual(compileModel(cfg).errors, []);
+const restored = migrateSession(JSON.parse(serializeSession(cfg, 'worked', {})));
+assert.deepEqual(restored.report.warnings, []);
+assert.deepEqual(restored.cfg, cfg);
+const independent = defaultModel('worked');
+cfg.arms[0].inLanes = 99;
+assert.notEqual(independent.arms[0].inLanes, 99);
+assert.deepEqual(defaultModel('unknown').signals, defaultModel('v1').signals);
+console.log('Проработанная модель: полная схема, независимые копии и повторное сохранение проверены.');

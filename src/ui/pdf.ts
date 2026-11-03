@@ -263,6 +263,8 @@ export async function exportPdf(o: PdfOptions): Promise<void> {
   // --- страница 3: графики ---
   newPage();
   text(`Метрики. ${o.source === 'rerun' ? `Новый прогон: ${o.amount} ${o.unit === 'seconds' ? 'с' : 'переключений фаз'}` : `Текущая симуляция, ${state.t.toFixed(0)} с`}`, 13, true);
+  text(cfg.sim.mode === 'visual' ? 'Наглядный режим: допускается явно отмеченное восстановление движения.' : 'Строгий расчёт без автоматического восстановления движения.', 9);
+  if (state.counters.interventions) text(`Вмешательств модели: ${state.counters.interventions}. Этот прогон непригоден для подбора программы светофоров.`, 10, true);
   y += 4;
   const ch = chartsFor(cfg).filter((c) => c.id !== 'errors');
   const chw = (W - 2 * M - 14) / 2, chh = 40;

@@ -15,8 +15,11 @@ export function validateExperiment(s: ExperimentSpec) {
 export function runExperiment(spec: ExperimentSpec, progress: (n: number) => void = () => {}): ExperimentResult {
   validateExperiment(spec);
   const result: ExperimentResult = { format: 'crossroad-experiment', version: 1, engineVersion: ENGINE_VERSION, spec: structuredClone(spec), runs: [] };
+  result.spec.cfg.sim.mode = 'strict';
+  result.spec.cfg.sim.dt = spec.dt;
   for (const seed of spec.seeds) {
     const cfg = structuredClone(spec.cfg); cfg.sim.seed = seed;
+    cfg.sim.mode = 'strict';
     const compiled = compileModel(cfg);
     if (compiled.errors.length) throw new Error(compiled.errors.join('\n'));
     const sim = new Simulation(cfg, compiled.code, { dt: spec.dt });

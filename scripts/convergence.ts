@@ -32,7 +32,7 @@ const metrics = [
 ] as const;
 const cases: Array<[string, () => ModelConfig]> = [
   ...PRESETS.map(p => [p.id, () => defaultModel(p.id)] as [string, () => ModelConfig]),
-  ...TEMPLATES.slice(1).map(t => ['template-' + t.id, t.make] as [string, () => ModelConfig]),
+  ...TEMPLATES.filter(t => t.id !== 'kolpino' && !PRESETS.some(p => p.id === t.id)).map(t => ['template-' + t.id, t.make] as [string, () => ModelConfig]),
 ];
 const picked = cases.filter(([label]) => !only || label === only);
 if (!picked.length) throw new Error('Не найдена модель для проверки.');
@@ -51,6 +51,8 @@ const report = {
 console.log(`Шаг расчёта: движок ${ENGINE_VERSION}, ${warmup}+${horizon} с, ${count} зёрен, ${steps.join(' / ')} с`);
 for (const [label, make] of picked) {
   const cfg = make();
+  cfg.sim.mode = 'strict';
+  cfg.sim.diagnosticRecovery = false;
   const result: typeof report.cases[number] = { label, cfg, runs: [], comparisons: [], failures: [] };
   report.cases.push(result);
   for (const seed of seeds) {

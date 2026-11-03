@@ -26,7 +26,7 @@ watch(() => editor.selected, (s) => { if (s) panel.value = 'item'; });
 
 const checks = computed(() => {
   void editor.version;
-  try { return runChecks(JSON.parse(JSON.stringify(editor.cfg)), { draftAsError: app.draftAsError }); } catch (e) { return [{ level: 'error' as const, code: 'build', msg: 'Модель не собирается: ' + (e instanceof Error ? e.message : String(e)) }]; }
+  try { return runChecks(JSON.parse(JSON.stringify(editor.cfg)), { draftAsError: app.draftAsError }); } catch (e) { return [{ level: 'error' as const, code: 'build', msg: 'Не удалось проверить модель. Проверьте геометрию и код узлов.' }]; }
 });
 const counts = computed(() => ({ error: checks.value.filter((c) => c.level === 'error').length, warn: checks.value.filter((c) => c.level === 'warn').length }));
 const LEVEL = { error: 'Ошибка', warn: 'Предупреждение', info: 'Сведения' } as const;

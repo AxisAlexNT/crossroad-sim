@@ -7,6 +7,7 @@ const props = defineProps<{ title: string; values: number[]; unit: string; color
 const cv = ref<HTMLCanvasElement | null>(null);
 const info = ref('');
 let ro: ResizeObserver | undefined;
+let resizeFrame = 0;
 
 function css(n: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#888';
@@ -100,11 +101,11 @@ function draw() {
 }
 
 onMounted(() => {
-  ro = new ResizeObserver(() => draw());
+  ro = new ResizeObserver(() => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(draw); });
   if (cv.value) ro.observe(cv.value);
   draw();
 });
-onBeforeUnmount(() => ro?.disconnect());
+onBeforeUnmount(() => { ro?.disconnect(); cancelAnimationFrame(resizeFrame); });
 watch(() => [props.tick, props.values.length, app.theme], () => draw());
 </script>
 

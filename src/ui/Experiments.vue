@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
-import ExperimentWorker from '../engine/experimentWorker?worker&inline';
+import { createCalculationWorker } from './calculationWorker';
 import { compareExperiments, parseExperiment, type ExperimentResult } from '../engine/experiment';
 import { checkFileSize } from '../engine/limits';
 import { normalizeModel } from '../engine/model';
@@ -8,6 +8,7 @@ import { hasCustomCode } from '../engine/compile';
 import { app, download } from './store';
 import { sandboxWasm } from './sandboxLoader';
 import UChart from './UChart.vue';
+const fileInput = ref<HTMLInputElement | null>(null);
 const results = shallowRef<ExperimentResult[]>([]);
 const revision = ref(0);
 watch(results, () => revision.value++);
@@ -22,17 +23,17 @@ async function run() {
     const cfg = normalizeModel(JSON.parse(JSON.stringify(app.cfg)));
     const wasm = hasCustomCode(cfg) ? (await sandboxWasm()).slice().buffer : undefined;
     if (token !== generation) return;
-    worker = new ExperimentWorker();
+    worker = createCalculationWorker('experiment');
     worker.onmessage = e => {
       if (token !== generation) return;
       if (e.data.progress) progress.value = e.data.progress;
-      if (e.data.error) { error.value = e.data.error; cancel(); }
+      if (e.data.error) { error.value = 'Не удалось выполнить эксперимент. Проверьте модель и параметры расчёта.'; cancel(); }
       if (e.data.result) { results.value = [...results.value.slice(-1), e.data.result]; cancel(); }
     };
-    worker.onerror = e => { if (token !== generation) return; error.value = e.message; cancel(); };
+    worker.onerror = e => { if (token !== generation) return; error.value = 'Фоновый расчёт прерван. Повторите запуск эксперимента.'; cancel(); };
     worker.onmessageerror = () => { if (token !== generation) return; error.value = 'Не удалось прочитать результат эксперимента.'; cancel(); };
     worker.postMessage({ spec: { cfg, warmup: warmup.value, horizon: horizon.value, dt: cfg.sim.dt, seeds: Array.from({ length: Math.max(1, Math.min(100, repetitions.value)) }, (_, i) => (cfg.sim.seed + i * 7919) % 2147483648) }, wasm });
-  } catch (e) { error.value = String(e); cancel(); }
+  } catch (e) { error.value = 'Не удалось выполнить расчёт. Проверьте настройки модели и повторите запуск.'; cancel(); }
 }
 async function importResult(event: Event) {
   const input = event.target as HTMLInputElement;
@@ -42,7 +43,7 @@ async function importResult(event: Event) {
     const loaded = parseExperiment(JSON.parse(await file.text()));
     results.value = [...results.value.slice(-1), loaded];
     error.value = '';
-  } catch (e) { error.value = String(e); }
+  } catch (e) { error.value = 'Не удалось открыть результат. Выберите файл, сохранённый в разделе сравнения экспериментов.'; }
   input.value = '';
 }
 const comparison = computed(() => {
@@ -50,7 +51,7 @@ const comparison = computed(() => {
   try {
     const c = compareExperiments(results.value[0], results.value[1], 'avgWait');
     return { eligible: true, text: `Разность ожидания, вариант 2 − вариант 1: ${c.mean.toFixed(2)} с; 95% интервал: ${c.ci95 === null ? 'недостаточно повторов' : `${(c.mean-c.ci95).toFixed(2)} … ${(c.mean+c.ci95).toFixed(2)} с`}` };
-  } catch (e) { return { eligible: false, text: e instanceof Error ? e.message : String(e) }; }
+  } catch (e) { return { eligible: false, text: 'Результаты нельзя сопоставить: проверьте одинаковые потоки, номера случайных прогонов, шаг и периоды измерения. В обоих расчётах не должно быть ошибок или ручных вмешательств.' }; }
 });
 const alignedSeries = computed(() => results.value.length === 2
   && JSON.stringify(results.value[0].runs[0].series.t) === JSON.stringify(results.value[1].runs[0].series.t));
@@ -59,15 +60,16 @@ const alignedSeries = computed(() => results.value.length === 2
 <template>
   <section class="card">
     <h3>Сравнение экспериментов</h3>
-    <label>Загрузить результат <input type="file" accept=".json" @change="importResult" /></label>
+    <input ref="fileInput" type="file" accept=".json" hidden @change="importResult" />
+    <button class="btn small" @click="fileInput?.click()">Открыть сохранённый результат</button>
     <div class="row wrap gap">
-      <label>Прогрев, с <input v-model.number="warmup" type="number" min="0" max="86400" /></label>
-      <label>Окно, с <input v-model.number="horizon" type="number" min="1" max="86400" /></label>
+      <label>Подготовительный период, с <input v-model.number="warmup" type="number" min="0" max="86400" /></label>
+      <label>Период измерения, с <input v-model.number="horizon" type="number" min="1" max="86400" /></label>
       <label>Повторы <input v-model.number="repetitions" type="number" min="1" max="100" /></label>
       <button class="btn" :disabled="busy" @click="run">Запустить текущую модель</button>
       <button v-if="busy" class="btn" @click="cancel">Отменить {{ progress }}/{{ repetitions }}</button>
     </div>
-    <p class="small muted">Сохраняются два последних эксперимента. Измените модель и запустите второй вариант с теми же зёрнами. Различия спроса и геометрии нужно учитывать при интерпретации.</p>
+    <p class="small muted">Сохраняются два последних эксперимента. Измените модель и запустите второй вариант с теми же номерами случайных прогонов. Различия спроса и геометрии нужно учитывать при интерпретации.</p>
     <p v-if="error" class="alert">{{ error }}</p>
     <p>{{ comparison.text }}</p>
     <UChart :key="revision" v-if="comparison.eligible && alignedSeries"

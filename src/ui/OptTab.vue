@@ -9,6 +9,16 @@ import { WorkerPool } from './pool';
 import OptPlot from './OptPlot.vue';
 import type { PlotAxis, PlotPoint } from './optplot';
 
+/** Перевод диагностического журнала на язык интерфейса без изменения расчёта. */
+function displayOptimizerLog(line: string): string {
+  return line.replace(/NSGA-II/g, 'многокритериальный эволюционный поиск')
+    .replace(/зёрнах|зернах/g, 'случайных потоках')
+    .replace(/зёрнам|зернам/g, 'случайным потокам')
+    .replace(/зёрен|зерен/g, 'случайных потоков')
+    .replace(/зерно/g, 'номер случайного прогона')
+    .replace(/прогрев/gi, 'выход на рабочий режим');
+}
+
 const s = reactive(defaultOptSettings(app.cfg));
 watch(() => app.cfg.signals.phases.map((p) => p.id + p.duration).join(), () => {
   if (running.value) return;
@@ -64,7 +74,7 @@ async function start() {
   opt = new Optimizer(cfg, settings, (xs, o) => Promise.all(xs.map((x) => pool!.eval({ cfg, code, durations: x, dt: settings.dt, warmup: settings.warmup, horizon: settings.simSeconds, seeds: o?.seeds ?? settings.seeds, seedBase: o?.seedBase }))), (p) => { progress.value = markRaw(p); }, w);
     await opt.run();
   } catch (e) {
-    toast('Подбор остановлен: ' + (e instanceof Error ? e.message : String(e)));
+    toast('Подбор остановлен. Проверьте модель и параметры расчёта, затем повторите запуск.');
   } finally {
     running.value = false;
     pool?.terminate();
@@ -91,7 +101,7 @@ function fmtFinal(c: Candidate, j: number) {
   return `${(sign * c.final.mean[j]).toFixed(1)} ± ${Number.isFinite(ci) ? ci.toFixed(1) : '—'}`;
 }
 function candidateStatus(c: Candidate) {
-  if (c.invalid) return `Непригодный прогон, зерно ${c.invalid.seed}: ${c.invalid.reasons.join(", ")}`;
+  if (c.invalid) return `Непригодный прогон, номер ${c.invalid.seed}: ${c.invalid.reasons.join(", ")}`;
   return c.final ? "Перепроверен" : c.summary ? "Оценён" : "Нарушены ограничения";
 }
 function applyCand(c: Candidate) {
@@ -240,6 +250,7 @@ function exportCsv() {
 
 <template>
   <div class="opt-tab">
+    <div class="row wrap gap"><span>Настройки подбора:</span><button class="btn small" :aria-pressed="!app.detailedSettings" @click="app.detailedSettings = false">Просто</button><button class="btn small" :aria-pressed="app.detailedSettings" @click="app.detailedSettings = true">Подробно</button></div>
     <section>
       <h3>Цели</h3>
       <div class="grid3">
@@ -248,16 +259,17 @@ function exportCsv() {
           {{ o.label }}, {{ o.sense === 'max' ? 'чем больше, тем лучше' : 'чем меньше, тем лучше' }}
         </label>
       </div>
-      <div class="small muted">Для одной цели используется дифференциальная эволюция, для нескольких — NSGA-II и множество Парето. Результат подбора — варианты в рамках модели для условных потоков, а не рекомендация к применению.</div>
+      <div class="small muted">Для одной цели поиск улучшает выбранный показатель. Для нескольких целей он предлагает варианты с разными преимуществами. Результат подбора — варианты в рамках модели для условных потоков, а не рекомендация к применению.</div>
       <div class="row gap wrap" style="margin-top: 8px">
+        <button v-if="running" class="btn danger" @click="stop">Остановить подбор</button>
         <button v-if="!running" class="btn primary wrap-btn" @click="quickStart">Быстрый подбор с рекомендуемыми ограничениями</button>
         <span class="small muted">Одна цель — среднее ожидание. Фаза не короче {{ s.minGreen }} с, красный не дольше 90 с, цикл не длиннее 120 с, пешеходам хватает времени, 3 прогона на вариант и перепроверка лучших.</span>
       </div>
     </section>
-    <section v-if="web">
+    <section v-if="web && app.detailedSettings">
       <h3>Опорная оценка по формуле Вебстера</h3>
       <div v-if="web.ok" class="small">
-        C₀ = (1,5·L + 5) / (1 − Y) — около <b>{{ web.cycle }} с</b>, потерянное время L ≈ {{ web.lost.toFixed(0) }} с, сумма фазовых коэффициентов Y ≈ {{ web.Y.toFixed(2).replace('.', ',') }}.
+        Оценка длительности цикла — около <b>{{ web.cycle }} с</b>, потерянное время ≈ {{ web.lost.toFixed(0) }} с, сумма фазовых коэффициентов ≈ {{ web.Y.toFixed(2).replace('.', ',') }}.
         Длительности основных тактов: {{ web.durations.join(' / ') }} с.
       </div>
       <div v-else class="small bad">Формула не применима: {{ web.why }}.</div>
@@ -267,7 +279,7 @@ function exportCsv() {
         <button class="btn small" :disabled="!web.ok || running" @click="applyWebster">Применить к модели</button>
       </div>
     </section>
-    <section>
+    <section v-if="app.detailedSettings">
       <h3>Что подбирать: длительности фаз в целых секундах</h3>
       <div class="row gap wrap">
         <label>Фаза не короче, с <input v-model.number="s.minGreen" type="number" min="1" max="60" step="1" style="width: 70px" /></label>
@@ -290,17 +302,17 @@ function exportCsv() {
         </table>
       </div>
     </section>
-    <section>
+    <section v-if="app.detailedSettings">
       <h3>Ограничения</h3>
       <div class="grid3">
         <label>Красный на любой транспортной группе не дольше, с, 0 — без ограничения <input v-model.number="s.maxRed" type="number" min="0" step="5" /></label>
         <label>Цикл не длиннее, с, 0 — без ограничения <input v-model.number="s.maxCycle" type="number" min="0" step="5" /></label>
         <label class="check"><input v-model="s.pedTime" type="checkbox" /> Пешеходам хватает времени на переход при скорости 1,2 м/с, с островком — на каждую половину</label>
-        <label class="check"><input v-model="s.pedTimePlus5" type="checkbox" :disabled="!s.pedTime" /> Добавить 5 с на начало движения, B / 1,2 + 5</label>
+        <label class="check"><input v-model="s.pedTimePlus5" type="checkbox" :disabled="!s.pedTime" /> Добавить 5 с на начало движения пешеходов</label>
       </div>
       <div v-if="startViolation.v > 0" class="small bad">Текущая программа нарушает ограничения: {{ startViolation.why.join(', ') }}</div>
     </section>
-    <section>
+    <section v-if="app.detailedSettings">
       <h3>Бюджет и точность</h3>
       <div class="grid3">
         <label>Время на подбор, с <input v-model.number="s.budgetSeconds" type="number" min="5" step="5" /></label>
@@ -309,27 +321,27 @@ function exportCsv() {
         <label>Шаг модели, с
           <select v-model.number="s.dt"><option :value="0.1">0,1 — точнее</option><option :value="0.2">0,2</option><option :value="0.25">0,25 — быстрее</option></select>
         </label>
-        <label>Прогонов с разным зерном на вариант <input v-model.number="s.seeds" type="number" min="1" max="10" step="1" /></label>
+        <label>Случайных прогонов на вариант <input v-model.number="s.seeds" type="number" min="1" max="10" step="1" /></label>
         <label>Перепроверить лучших вариантов <input v-model.number="s.reevalTop" type="number" min="0" max="20" step="1" /></label>
-        <label>Новых зёрен для перепроверки <input v-model.number="s.reevalSeeds" type="number" min="0" max="20" step="1" /></label>
+        <label>Новых случайных прогонов для проверки <input v-model.number="s.reevalSeeds" type="number" min="0" max="20" step="1" /></label>
         <label>Популяция <input v-model.number="s.population" type="number" min="4" max="60" step="2" /></label>
         <label>Потоков вычислений <input v-model.number="s.workers" type="number" min="1" max="8" step="1" /></label>
         <label>Алгоритм
-          <select v-model="s.algorithm"><option value="auto">по числу целей</option><option value="nsga2">NSGA-II</option><option value="de">дифференциальная эволюция</option></select>
+          <select v-model="s.algorithm"><option value="auto">по числу целей</option><option value="nsga2">поиск компромиссов между целями</option><option value="de">дифференциальная эволюция</option></select>
         </label>
       </div>
       <div class="row gap wrap">
         <button v-if="!running" class="btn primary" @click="start">Запустить подбор</button>
         <button v-else class="btn danger" @click="stop">{{ stage === 'reeval' || stopping ? 'Прервать' : 'Остановить и перепроверить лучшие' }}</button>
-        <button class="btn" :disabled="!progress" @click="exportResults">Скачать результат JSON</button>
+        <button class="btn" :disabled="!progress" @click="exportResults">Скачать результаты</button>
         <button class="btn" :disabled="!progress" @click="exportCsv">Все варианты CSV</button>
       </div>
     </section>
     <section v-if="progress">
       <h3>Результаты <span class="small muted">— оценок {{ progress.evaluations }}, поколение {{ progress.generation }}, {{ progress.elapsed.toFixed(0) }} с{{ progress.done ? ', готово' : '' }}</span></h3>
-      <div v-if="stage === 'reeval' && !progress.done" class="small">Идёт перепроверка лучших вариантов на новых зёрнах…</div>
+      <div v-if="stage === 'reeval' && !progress.done" class="small">Идёт перепроверка лучших вариантов на новых случайных потоках…</div>
       <div v-if="finalRows.length" class="final-box">
-        <h4>Итог после перепроверки на новых зёрнах</h4>
+        <h4>Итог после перепроверки на новых случайных потоках</h4>
         <div class="table-scroll">
           <table class="tbl">
             <thead>
@@ -347,7 +359,7 @@ function exportCsv() {
             </tbody>
           </table>
         </div>
-        <div class="small muted">Среднее и половина ширины 95 % доверительного интервала по новым зёрнам, все варианты на одних и тех же потоках машин и пешеходов. Варианты отсортированы по среднему. Если интервалы перекрываются, в модели эти варианты не различаются.</div>
+        <div class="small muted">Среднее и половина ширины 95 % доверительного интервала по новым случайным потокам, все варианты на одних и тех же потоках машин и пешеходов. Варианты отсортированы по среднему. Для вывода о различии вариантов требуется парное сравнение; перекрытие этих интервалов само по себе не доказывает равенство.</div>
       </div>
       <div class="opt-plots">
         <OptPlot v-model:x="scatter.x" v-model:y="scatter.y" mode="scatter" :points="plotPoints" :axes="metrics" :tick="plotTick" @pick="pick" />
@@ -383,7 +395,7 @@ function exportCsv() {
         </table>
       </div>
       <button v-if="rows.length >= rowLimit" class="btn small" @click="rowLimit += 200">Показать ещё</button>
-      <pre class="opt-log">{{ progress.log.slice(-40).join('\n') }}</pre>
+      <pre class="opt-log">{{ progress.log.slice(-40).map(displayOptimizerLog).join('\n') }}</pre>
     </section>
   </div>
 </template>

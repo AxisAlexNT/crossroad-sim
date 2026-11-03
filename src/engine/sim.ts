@@ -107,6 +107,9 @@ export interface Vehicle {
   yieldTo: number;
   /** До этого времени машина выбирается из неразрешимой блокировки и не проверяет пересечения с другими манёврами */
   ghostUntil: number;
+  /** Участник наглядного разъезда ждёт освобождения пути выбранной машиной. */
+  visualYieldTo?: number;
+  visualYieldUntil?: number;
   entryPermit: Permit;
   yellowDecision: 0 | 1 | 2;
   crashed: boolean;
@@ -184,6 +187,10 @@ export interface Counters {
   gridlock: number;
   codeErrors: number;
   removedCrash: number;
+  /** Явные вмешательства наглядного режима. */
+  interventions: number;
+  /** Машины, убранные при наглядном разрешении неразрешимого затора. */
+  removedRecovery: number;
   dropped: number;
   pedSpawned: number;
   /** Человек, не размещённых из-за ограничения числа групп; прогон непригоден. */
@@ -226,6 +233,7 @@ export interface SimStatus {
   deadlock: DeadlockInfo | null;
   stall: StatusInfo[];
   slow: StatusInfo[];
+  lastIntervention?: { t: number; vid: number; text: string; x: number; y: number };
 }
 
 interface Diag {
@@ -603,7 +611,7 @@ export class Simulation {
       crashes: [],
       counters: {
         spawned: 0, crossedStop: 0, exited: 0, sumWait: 0, waitArea: 0, delayArea: 0, waitAreaBy: {}, pedWaitArea: 0, crossedBy: {}, waitBy: {}, sumDelay: 0, errors: 0, collisions: 0, dangers: 0, crossings: 0,
-        forcedLC: 0, gridlock: 0, codeErrors: 0, removedCrash: 0, dropped: 0,
+        forcedLC: 0, gridlock: 0, codeErrors: 0, removedCrash: 0, dropped: 0, interventions: 0, removedRecovery: 0,
         pedSpawned: 0, pedDropped: 0, pedDone: 0, pedWaitSum: 0, pedDangers: 0, pedHits: 0, pedRouteErrors: 0,
         missedTurns: 0, violSolid: 0, violStop: 0, violRed: 0, violTurn: 0, busSpawned: 0, busServed: 0, busDwellSum: 0, deadlocks: 0, stalls: 0,
       },
@@ -1470,26 +1478,31 @@ export class Simulation {
   private acceptedGrantRecipient(giver: Vehicle, A: number, cr: ConflictRef): Vehicle | undefined {
     const B = cr.other, cf = this.net.conflicts[cr.conflict];
     const end = cr.side === 'a' ? cf.bEnd : cf.aEnd;
-    const owns = (o: Vehicle) => o !== giver && !o.crashed && o.conn === B
-      && o.acceptedGrants?.[cr.conflict] === giver.id && o.committed.includes(cr.conflict)
-      && (!cf.body || this.bodyConflictApplies(giver, A, o, B));
-    for (const o of this.connLists[B]) if (o.s - o.len < end && owns(o)) return o;
+    for (const o of this.connLists[B]) if (o.s - o.len < end && this.ownsAcceptedGrant(o, giver, A, cr)) return o;
     const from = this.net.conns[B].conn.from;
-    for (const o of this.laneLists[from.arm]?.[from.lane] ?? []) if (owns(o)) return o;
+    for (const o of this.laneLists[from.arm]?.[from.lane] ?? []) if (this.ownsAcceptedGrant(o, giver, A, cr)) return o;
     // На выезде координата передка снова начинается с нуля. Нос автобуса
     // уже за перекрёстком ещё не означает освобождения зоны задним краем.
     const to = this.net.conns[B].conn.to;
     for (const o of this.exitLists[to.arm]?.[to.lane] ?? []) {
-      if (this.net.conns[B].path.length + o.s - o.len < end && owns(o)) return o;
+      if (this.net.conns[B].path.length + o.s - o.len < end && this.ownsAcceptedGrant(o, giver, A, cr)) return o;
     }
     return undefined;
+  }
+
+  private ownsAcceptedGrant(other: Vehicle, giver: Vehicle, A: number, cr: ConflictRef): boolean {
+    return other !== giver && !other.crashed && other.conn === cr.other
+      && other.acceptedGrants?.[cr.conflict] === giver.id && other.committed.includes(cr.conflict)
+      && (!this.net.conflicts[cr.conflict].body || this.bodyConflictApplies(giver, A, other, cr.other));
   }
 
   /** Возврат ещё не начатого проезда возможен только по согласованной неподвижной цепочке. */
   private returnAcceptedGrant(veh: Vehicle, A: number, cr: ConflictRef, recipient: Vehicle): boolean {
     const cf = this.net.conflicts[cr.conflict];
     const start = cr.side === 'a' ? cf.bStart : cf.aStart;
-    if (veh.v >= 0.5 || recipient.phase !== 'conn' || recipient.s >= start - 1) return false;
+    const position = recipient.phase === 'approach'
+      ? recipient.s - this.net.arms[recipient.origin].cfg.approachLength : recipient.s;
+    if (veh.v >= 0.5 || recipient.phase === 'exit' || position >= start - 1) return false;
     if (!this.acceptSiblingGrant(veh, A, recipient, true)) return false;
     // Старое и новое владение изменяются вместе. Остановившийся получатель
     // не сможет тронуться по прежнему резерву после передачи права обратно.
@@ -1703,6 +1716,14 @@ export class Simulation {
       if (!sees(dB)) continue;
       // машина стоит за другой, которая тоже стоит: пока они не тронутся, помехи нет
       if (o.v < 0.3 && (o.why === 'leader' || o.why === 'merge' || o.why === 'bus') && this.vehStopped(o.whyId)) continue;
+      // Ожидание места за зоной — тоже очередь по своей траектории.
+      // Передняя машина уже внутри перекрёстка, следующая ещё до линии;
+      // её неподвижный поток не должен запирать освобождающий выезд автобус.
+      if (o.v < 0.3 && o.why === 'yield'
+        && !(o.committed.includes(cr.conflict) && o.acceptedGrants?.[cr.conflict] === veh.id)
+        && this.st.vehicles.some(lead => lead.id === o.yieldTo && lead.phase === 'conn'
+          && lead.v < 0.3 && lead.conn >= 0
+          && this.net.conns[lead.conn].conn.id === this.net.conns[B].conn.id)) continue;
       // Резерв выдаётся до стоп-линии. При возобновлении движения после
       // ожидания учитываем его и на подходе, иначе оба потока въедут в зону.
       if (o.committed.includes(cr.conflict)) { this.blocker = o.id; return true; }
@@ -1734,6 +1755,11 @@ export class Simulation {
   private acceptSiblingGrant(veh: Vehicle, ci: number, other: Vehicle, orderedCycle = false): boolean {
     if (other.v >= 0.5 || other.crashed || other.conn < 0) return false;
     const c = this.net.conns[ci], b = this.net.conns[other.conn];
+    // Принятое адресное разрешение сохраняется, даже если уступающий
+    // ждёт перед более ранней зоной из-за занятого места дальше по пути.
+    if (other.why === 'yield' && other.yieldTo === veh.id && c.conflicts.some(ref => ref.other === other.conn
+      && veh.s - veh.len < ref.end && veh.committed.includes(ref.conflict)
+      && veh.acceptedGrants?.[ref.conflict] === other.id)) return this.grantPathClear(veh, ci, [other]);
     const sameInput = c.conn.from.arm === b.conn.from.arm && c.conn.from.lane === b.conn.from.lane;
     const position = veh.phase === 'approach' ? veh.s - this.net.arms[veh.origin].cfg.approachLength : veh.s;
     // Следуем по неподвижной цепочке ожидания до адресной уступки нам.
@@ -1763,9 +1789,10 @@ export class Simulation {
       // В замкнутой неподвижной цепочке все участники уже уступают друг
       // другу. Выбирается раньше въехавший среди тех, кто может физически
       // завершить проезд. Занятый путь старшего участника не запирает младших.
-      if (veh.phase !== 'conn' || veh.tStop < 0 || chain.some(o => o.phase !== 'conn' || o.tStop < 0
-        || ((o.tStop < veh.tStop || (o.tStop === veh.tStop && compareArrivalOrder(o, veh) <= 0))
-          && this.grantPathClear(o, o.conn, cycle)))) return false;
+      if (veh.phase !== 'conn' || veh.tStop < 0 || chain.some(o => o.phase === 'exit'
+        || (o.phase === 'conn' && (o.tStop < 0
+          || ((o.tStop < veh.tStop || (o.tStop === veh.tStop && compareArrivalOrder(o, veh) <= 0))
+            && this.grantPathClear(o, o.conn, cycle)))))) return false;
     }
     // Принятая адресная уступка сохраняет очередность проезда зоны,
     // даже когда принявший уступку водитель сменит состояние на «движется».
@@ -1797,28 +1824,35 @@ export class Simulation {
     // места для всего кузова за зоной. Это касается и ещё общего участка вариантов.
     const c = this.net.conns[ci];
     const position = -offset;
-    const blocksStorage = (o: Vehicle, sibling = false) => {
-      if (o === veh || o.s <= position) return false;
-      // Тормозящий лидер может ещё двигаться, но уже останавливаться внутри
-      // нужного нам запаса. Проверяем прогноз остановки при текущем замедлении.
-      const stop = o.v < 0.5 ? o.s : o.a < -0.1 ? o.s + o.v * o.v / (-2 * o.a) : Infinity;
-      if (stop - o.len >= cr.end + veh.len + veh.s0) return false;
-      if (sibling && this.acceptSiblingGrant(veh, ci, o)) return false;
-      this.blocker = o.id;
-      return true;
-    };
-    if (this.connLists[ci].some(o => blocksStorage(o))) return true;
+    for (const o of this.connLists[ci]) if (this.blocksConflictStorage(veh, ci, cr, position, o, false)) return true;
     for (const sibling of c.siblings) {
       if (cr.start >= sibling.until) continue;
-      if (this.connLists[sibling.conn].some(o => o.s - o.len <= sibling.until && blocksStorage(o, true))) return true;
+      for (const o of this.connLists[sibling.conn]) {
+        if (o.s - o.len <= sibling.until && this.blocksConflictStorage(veh, ci, cr, position, o, true)) return true;
+      }
     }
-    if (!this.connLists[cr.other].some((o) => o !== veh && !o.crashed)) return false;
-    for (const c2 of this.net.conns[ci].conflicts) {
-      if (c2 === cr || c2.start <= cr.start || c2.start > cr.end + veh.len + 0.5) continue;
+    const refs = c.conflicts;
+    // Список зон упорядочен сетью. Находим только последующие зоны,
+    // сохраняя тот же порядок проверок и все их побочные эффекты.
+    let lo = 0, hi = refs.length;
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (refs[mid].start <= cr.start) lo = mid + 1; else hi = mid; }
+    for (let i = lo; i < refs.length; i++) {
+      const c2 = refs[i];
+      if (c2.start > cr.end + veh.len + 0.5) break;
       if (veh.committed.includes(c2.conflict)) continue;
       if (this.mustWait(veh, ci, c2, offset + c2.start, offset + c2.end)) return true;
     }
     return false;
+  }
+
+  private blocksConflictStorage(veh: Vehicle, ci: number, cr: ConflictRef, position: number, other: Vehicle, sibling: boolean): boolean {
+    if (other === veh || other.s <= position) return false;
+    // Прогноз остановки тормозящего лидера сохраняет место для всего кузова.
+    const stop = other.v < 0.5 ? other.s : other.a < -0.1 ? other.s + other.v * other.v / (-2 * other.a) : Infinity;
+    if (stop - other.len >= cr.end + veh.len + veh.s0) return false;
+    if (sibling && this.acceptSiblingGrant(veh, ci, other)) return false;
+    this.blocker = other.id;
+    return true;
   }
 
   private vehStopped(id: number): boolean {
@@ -1838,10 +1872,10 @@ export class Simulation {
       if (cf.same && o.tStop > veh.tStop) continue;
       if (cf.body && !this.bodyConflictApplies(veh, veh.conn, o, cr.other)) continue;
       if (o.s > bStart) {
-        if (o.v > 0.5 || this.firstHit(veh, veh.conn, veh.s + 0.3, cr.end + veh.len, o) < Infinity) return true;
+        if (o.v > 0.5 || this.firstHit(veh, veh.conn, veh.s + 0.3, cr.end + veh.len, o) < Infinity) { this.blocker = o.id; return true; }
         continue;
       }
-      if (o.v > 0.5 && this.timeToCover(bStart - o.s, o.v, 1.5, Math.max(o.v, 9)) < myClear + 0.5) return true;
+      if (o.v > 0.5 && this.timeToCover(bStart - o.s, o.v, 1.5, Math.max(o.v, 9)) < myClear + 0.5) { this.blocker = o.id; return true; }
     }
     return false;
   }
@@ -1855,7 +1889,7 @@ export class Simulation {
       if (o === veh || o.v > 2) continue;
       if (cf.body && !this.bodyConflictApplies(veh, veh.conn, o, cr.other)) continue;
       const position = veh.phase === 'approach' ? veh.s - this.net.arms[veh.origin].cfg.approachLength : veh.s;
-      if (o.s > bStart && o.s - o.len < bEnd && (o.v >= 0.3 || o.a >= 0.2 || this.sweepHits(veh, veh.conn, position + 0.3, cr.end + veh.len, o))) return true;
+      if (o.s > bStart && o.s - o.len < bEnd && (o.v >= 0.3 || o.a >= 0.2 || this.sweepHits(veh, veh.conn, position + 0.3, cr.end + veh.len, o))) { this.blocker = o.id; return true; }
     }
     return false;
   }
@@ -2028,7 +2062,7 @@ export class Simulation {
   }
 
   /** Не успел занять нужную полосу до сплошной: по ПДД едет по направлению, разрешённому из своей полосы */
-  private resolveMissedLane(veh: Vehicle, allowSolid: boolean) {
+  private resolveMissedLane(veh: Vehicle, allowSolid: boolean, allowViolation = true) {
     const st = this.st;
     const reach = this.net.reachable[veh.origin][veh.lane] ?? [];
     if (!reach.length) return;
@@ -2037,7 +2071,7 @@ export class Simulation {
       return;
     }
     const ill = this.net.illegalFor[veh.origin]?.[veh.lane]?.[veh.dest];
-    if (veh.viol.turn && ill !== undefined) {
+    if (allowViolation && veh.viol.turn && ill !== undefined) {
       veh.illegal = true;
       veh.conn = ill;
       veh.committed = []; veh.acceptedGrants = undefined;
@@ -2060,6 +2094,7 @@ export class Simulation {
     veh.wrongLane = false;
     veh.solidCross = false;
     veh.conn = -1;
+    veh.lcWaitSince = -1;
     veh.committed = []; veh.acceptedGrants = undefined;
     st.counters.missedTurns++;
     this.addLog('info', 'missed-turn', `Машина #${veh.id} не успела занять полосу на «${this.armName(veh.origDest)}» до сплошной и поехала на «${this.armName(best)}», как разрешено из её полосы`, undefined, veh.id);
@@ -2089,6 +2124,17 @@ export class Simulation {
     if (veh.crashed) { veh.why = 'crash'; return 0; }
     const st = this.st;
     const sim = this.cfg.sim;
+    if (sim.mode === 'visual' && veh.visualYieldTo !== undefined) {
+      const leader = this.vehicleById.get(veh.visualYieldTo);
+      if (leader && st.t < (veh.visualYieldUntil ?? Infinity) && (leader.phase !== 'exit' || leader.s <= leader.len)) {
+        veh.why = 'yield'; veh.yieldTo = leader.id;
+        veh.whyId = this.net.conns[veh.conn]?.conflicts.find(cr => cr.other === leader.conn)?.conflict ?? -1;
+        veh.yieldingAt = veh.whyId;
+        return -B_MAX;
+      }
+      delete veh.visualYieldTo;
+      delete veh.visualYieldUntil;
+    }
     // рейсовый автобус стоит на остановке
     if (veh.dwellUntil >= 0) {
       veh.why = 'bus';
@@ -2109,7 +2155,13 @@ export class Simulation {
     const take = (gap: number, vLead: number, why: Why = 'leader', who = -1) => {
       if (why === 'yield' && who >= 0) gap = this.clearYieldGap(veh, who, gap);
       const acc = this.idm(veh, v0, gap, vLead);
-      if (acc < a) { a = acc; veh.why = why; veh.whyId = who; }
+      if (acc < a) {
+        a = acc; veh.why = why; veh.whyId = who;
+        // Таймер начинается у хвоста очереди, а не только в последних
+        // трёх метрах перед сплошной: очередь может стоять далеко от неё.
+        if (why === 'lc' && veh.phase === 'approach' && veh.lcT < 0 && veh.v < 0.3
+          && veh.lane !== veh.targetLane && veh.lcWaitSince < 0) veh.lcWaitSince = st.t;
+      }
     };
     veh.yieldingAt = -1;
     veh.yieldTo = -1;
@@ -2121,6 +2173,11 @@ export class Simulation {
       const rmap = veh.route ? this.net.reachableBus : this.net.reachable;
       let canReach = !!rmap[veh.origin][veh.lane]?.includes(veh.dest);
       const reachTarget = !!rmap[veh.origin][veh.targetLane]?.includes(veh.dest);
+      if (veh.lcT < 0 && veh.lcWaitSince >= 0 && st.t - veh.lcWaitSince >= 120) {
+        if (!canReach) this.resolveMissedLane(veh, false, false);
+        else { veh.targetLane = veh.lane; veh.lcWaitSince = -1; veh.lcHelper = -1; }
+        canReach = !!rmap[veh.origin][veh.lane]?.includes(veh.dest);
+      }
       // начало сплошной: перестраиваться дальше нельзя (разметка 1.1)
       if (!canReach && veh.lcT < 0 && !veh.illegal && !(veh.route && this.busStopAhead(veh))) {
         const atSolid = veh.s >= arm.lcS - 3.5;
@@ -2255,7 +2312,7 @@ export class Simulation {
           for (const cr of this.net.conns[veh.conn].conflicts) {
             if (veh.committed.includes(cr.conflict)) {
               // даже после решения проехать не въезжаем в стоящую в зоне машину
-              if (this.zoneHeld(veh, cr)) { take(dStop + cr.start - 0.8, 0, 'yield', cr.conflict); break; }
+              if (this.zoneHeld(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; take(dStop + cr.start - 0.8, 0, 'yield', cr.conflict); break; }
               continue;
             }
             const ds = dStop + cr.start, de = dStop + cr.end;
@@ -2310,7 +2367,12 @@ export class Simulation {
         for (const o of this.connLists[cr.other]) {
           if (o === veh || o.s < bStart) continue;
           const oRem = lenB - o.s;
-          if (oRem < myRem) take(myRem - oRem - o.len, o.v, 'merge', o.id);
+          if (oRem < myRem) {
+            // Дистанционный порядок слияния не отменяет адресное согласие
+            // неподвижной цепочки, если весь путь получателя свободен.
+            if (this.acceptSiblingGrant(veh, veh.conn, o)) continue;
+            take(myRem - oRem - o.len, o.v, 'merge', o.id);
+          }
         }
       }
       // выбирается из неразрешимой блокировки: в модели водители разъезжаются вручную
@@ -2361,16 +2423,26 @@ export class Simulation {
               break;
             }
           }
-          if (cr.start - veh.s > 0.5 && this.zoneHeld(veh, cr)) { take(cr.start - veh.s - 0.8, 0, 'yield', cr.conflict); break; }
+          // Право проезда не создаёт свободное место за зоной: очередь могла
+          // остановиться уже после выдачи резерва, в том числе до смены сигнала.
+          if (cr.start - veh.s > 0.5 && this.wouldStopInside(veh, veh.conn, cr, -veh.s)) {
+            const gap = this.clearYieldGap(veh, cr.conflict, cr.start - veh.s - 1);
+            if (gap - veh.s0 >= veh.v * veh.v / (2 * B_MAX) - 1e-9) {
+              veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker;
+              take(gap, 0, 'yield', cr.conflict); break;
+            }
+          }
+          if (cr.start - veh.s > 0.5 && this.zoneHeld(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; take(cr.start - veh.s - 0.8, 0, 'yield', cr.conflict); break; }
           // уже в зоне: стоящую впереди поперёк пути машину объезжать некуда, ждём
           let hit = Infinity;
           for (const o of this.connLists[cr.other]) {
             if (o === veh || o.v > 2 || o.crashed) continue;
-            hit = Math.min(hit, this.firstHit(veh, veh.conn, veh.s + 0.3, Math.min(veh.s + 8, cr.end + veh.len), o));
+            const candidate = this.firstHit(veh, veh.conn, veh.s + 0.3, Math.min(veh.s + 8, cr.end + veh.len), o);
+            if (candidate < hit) { hit = candidate; this.blocker = o.id; }
           }
-          if (hit < Infinity) { take(Math.max(0, hit - veh.s - 0.6), 0, 'yield', cr.conflict); break; }
+          if (hit < Infinity) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; take(Math.max(0, hit - veh.s - 0.6), 0, 'yield', cr.conflict); break; }
           // стоит у края зоны и собирается тронуться: пропускает тех, кто уже въезжает в зону
-          if (veh.v < 1 && cr.start - veh.s > -0.5 && this.othersEntering(veh, cr)) { take(Math.max(0, cr.start - veh.s - 0.3), 0, 'yield', cr.conflict); break; }
+          if (veh.v < 1 && cr.start - veh.s > -0.5 && this.othersEntering(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; take(Math.max(0, cr.start - veh.s - 0.3), 0, 'yield', cr.conflict); break; }
           continue;
         }
         const ds = cr.start - veh.s, de = cr.end - veh.s;
@@ -2934,7 +3006,7 @@ export class Simulation {
             `Машина: ${v.conn >= 0 ? this.connLabel(v.conn) : this.armName(v.origin)}\nПешеходы: ${this.pedNodeName(p.origin)} → ${this.pedNodeName(p.dest)}`, v.id);
           if (sim.crashPersist) {
             p.hit = true;
-            p.hitUntil = st.t + sim.crashDuration;
+            p.hitUntil = st.t + (sim.mode === 'visual' ? Math.min(90, sim.crashDuration) : sim.crashDuration);
             // машина остаётся на месте и перекрывает проезд, как при столкновении
             this.makeCrash([v]);
           }
@@ -2956,7 +3028,7 @@ export class Simulation {
     for (const v of vs) {
       v.crashed = true;
       v.v = 0;
-      v.crashUntil = st.t + sim.crashDuration;
+      v.crashUntil = st.t + (sim.mode === 'visual' ? Math.min(90, sim.crashDuration) : sim.crashDuration);
     }
     const x = vs.reduce((s, v) => s + v.x, 0) / vs.length;
     const y = vs.reduce((s, v) => s + v.y, 0) / vs.length;
@@ -2970,7 +3042,7 @@ export class Simulation {
       }
       if (bestD < r + 1.5) blocks.push({ conn: ci, s: Math.max(0, bestS - r - 1) });
     });
-    st.crashes.push({ id: st.nextCrash++, x, y, r, until: st.t + sim.crashDuration, vids: vs.map((v) => v.id), blocks });
+    st.crashes.push({ id: st.nextCrash++, x, y, r, until: st.t + (sim.mode === 'visual' ? Math.min(90, sim.crashDuration) : sim.crashDuration), vids: vs.map((v) => v.id), blocks });
   }
 
   private expireCrashes() {
@@ -2979,6 +3051,10 @@ export class Simulation {
     const gone = new Set<number>();
     for (const v of st.vehicles) if (v.crashed && st.t >= v.crashUntil) gone.add(v.id);
     if (gone.size) {
+      if (this.cfg.sim.mode === 'visual') {
+        const first = st.vehicles.find(v => gone.has(v.id))!;
+        this.recordIntervention(first, 'Модель освободила место аварии: повреждённые машины убраны');
+      }
       st.vehicles = st.vehicles.filter((v) => !gone.has(v.id));
       st.counters.removedCrash += gone.size;
       this.addLog('info', 'crash-clear', `Место столкновения освобождено, проезд восстановлен, машины ${[...gone].map((i) => '#' + i).join(', ')}`);
@@ -2998,6 +3074,46 @@ export class Simulation {
   }
 
   // ---------------- Диагностика: взаимная блокировка, нет проезда, падение скорости ----------------
+
+  private recordIntervention(veh: Vehicle, text: string) {
+    this.st.counters.interventions = (this.st.counters.interventions ?? 0) + 1;
+    this.st.status.lastIntervention = { t: this.st.t, vid: veh.id, text, x: veh.x, y: veh.y };
+    this.addLog('warn', 'deadlock-manual', text, 'Наглядный режим: результат содержит вмешательство модели и не подходит для подбора фаз.', veh.id);
+  }
+
+  private visualRecovery(ids: number[], since: number) {
+    const st = this.st;
+    if (this.cfg.sim.mode !== 'visual' || st.t - since < 60) return;
+    const participants = ids.map(id => this.vehicleById.get(id)).filter((v): v is Vehicle => !!v && !v.crashed);
+    if (participants.some(v => v.visualYieldTo !== undefined || v.v >= 0.3)) return;
+    const entered = participants.filter(v => v.phase === 'conn').sort((a, b) => a.tStop - b.tStop || compareArrivalOrder(a, b));
+    // Сначала пробуем согласованный разъезд по физически свободному пути.
+    // Остальные участники ждут выхода заднего края. Коллизии не отключаются.
+    const pick = entered.find(v => this.grantPathClear(v, v.conn, st.vehicles) && !this.exitBlocked(v.conn, v));
+    if (pick) {
+      for (const other of participants) {
+        if (other === pick) continue;
+        other.visualYieldTo = pick.id;
+        other.visualYieldUntil = st.t + 60;
+        for (const cr of this.net.conns[pick.conn].conflicts) {
+          if (cr.other !== other.conn) continue;
+          other.committed = other.committed.filter(id => id !== cr.conflict);
+          if (other.acceptedGrants) delete other.acceptedGrants[cr.conflict];
+          if (!pick.committed.includes(cr.conflict)) pick.committed.push(cr.conflict);
+          (pick.acceptedGrants ??= {})[cr.conflict] = other.id;
+        }
+      }
+      this.recordIntervention(pick, `Модель согласовала разъезд: первой проезжает машина №${pick.id}`);
+    } else if (st.t - since >= 120 && entered.length) {
+      // Если свободного пути нет, явно убирается один участник. Он не
+      // считается завершившим поездку и не проезжает сквозь чужие кузова.
+      const removed = entered[0];
+      st.vehicles = st.vehicles.filter(v => v !== removed);
+      st.counters.removedRecovery = (st.counters.removedRecovery ?? 0) + 1;
+      this.recordIntervention(removed, `Модель убрала машину №${removed.id}, чтобы освободить неразрешимый затор`);
+      this.index();
+    }
+  }
 
   private diagnose() {
     const st = this.st;
@@ -3064,6 +3180,7 @@ export class Simulation {
     });
     st.diag.cycleSince = candidates;
     const ph = this.cfg.signals.phases[st.sig.phaseIdx];
+    for (const comp of locked) this.visualRecovery(comp, candidates[cycleKey(comp)]);
     if (locked.length) {
       const vids = locked.flat();
       const movements = [...new Set(vids.map((id) => { const v = byId.get(id)!; return v.conn >= 0 ? this.connLabel(v.conn) : `${this.armName(v.origin)} → ${this.armName(v.dest)}`; }))];
@@ -3081,7 +3198,7 @@ export class Simulation {
     // блокировка, которую не разрешили ни правила, ни выход водителей с нарушением очерёдности: обычно это машины,
     // вставшие поперёк друг друга, пока проезд перекрывало столкновение. В жизни водители разъезжаются вручную,
     // в модели одна из машин проезжает, а касание кузовами при этом не считается столкновением
-    if (sim.diagnosticRecovery && sim.deadlockBreak > 0) for (const comp of locked) {
+    if (sim.mode === undefined && sim.diagnosticRecovery && sim.deadlockBreak > 0) for (const comp of locked) {
       const vs = comp.map((id) => byId.get(id)!).filter((v) => v.phase === 'conn' && !v.crashed);
       const since = Math.min(...comp.map((id) => byId.get(id)!.stopSince));
       if (!vs.length || t - since < Math.max(60, 3 * sim.deadlockBreak) || vs.some((v) => v.ghostUntil > t - 20)) continue;
@@ -3249,6 +3366,8 @@ export class Simulation {
 
   restore(snap: SimState) {
     this.st = structuredClone(snap);
+    this.st.counters.interventions ??= 0;
+    this.st.counters.removedRecovery ??= 0;
     const t = this.st.t;
     const s = this.series;
     let n = s.t.length;

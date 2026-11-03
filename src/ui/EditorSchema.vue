@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { humanFileError } from './migrationText';
 // Панель редактора: модель, шаблоны, подходы под любыми углами, автоматическая достройка
 // направлений, пешеходного графа и светофорной программы. Работает с черновиком редактора.
 import { computed, ref } from 'vue';
@@ -128,7 +129,7 @@ function exportModel() {
 function importModel(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0];
   if (!f) return;
-  try { checkFileSize(f.size); } catch (err) { toast('Не удалось загрузить: ' + (err as Error).message); (e.target as HTMLInputElement).value = ''; return; }
+  try { checkFileSize(f.size); } catch (err) { toast(humanFileError(err)); (e.target as HTMLInputElement).value = ''; return; }
   f.text().then(async (t) => {
     try {
       const cfg = await vetCustomCode(normalizeModel(JSON.parse(t)));
@@ -136,7 +137,7 @@ function importModel(e: Event) {
       remember();
       loadModel(cfg, `Загружена модель «${cfg.name}»`);
     } catch (err) {
-      toast('Не удалось загрузить: ' + (err instanceof Error ? err.message : String(err)));
+      toast(humanFileError(err));
     }
   });
   (e.target as HTMLInputElement).value = '';
@@ -152,14 +153,14 @@ async function applyJson() {
     const cfg = await vetCustomCode(normalizeModel(JSON.parse(jsonText.value)));
     if (!cfg) return;
     remember();
-    loadModel(cfg, 'Модель из JSON применена');
+    loadModel(cfg, 'Изменения модели применены');
     jsonErr.value = '';
   } catch (err) {
-    jsonErr.value = err instanceof Error ? err.message : String(err);
+    jsonErr.value = humanFileError(err);
   }
 }
 async function copyJson() {
-  try { await navigator.clipboard.writeText(serializeModel(editor.cfg)); toast('JSON модели скопирован'); } catch { toast('Буфер обмена недоступен'); }
+  try { await navigator.clipboard.writeText(serializeModel(editor.cfg)); toast('Текст модели скопирован'); } catch { toast('Буфер обмена недоступен'); }
 }
 const counts = computed(() => ({
   arms: editor.cfg.arms.length,
@@ -204,7 +205,7 @@ const counts = computed(() => ({
           <table class="tbl arm-table">
             <thead>
               <tr>
-                <th>id</th><th>Название</th><th>Сторона</th><th>Угол, °</th><th>Полос к / от</th><th>Ширина полосы</th><th>Разделитель</th>
+                <th>Код</th><th>Название</th><th>Сторона</th><th>Угол, °</th><th>Полос к / от</th><th>Ширина полосы</th><th>Разделитель</th>
                 <th>Переход от центра</th><th>Переход</th><th>Островок</th><th>км/ч</th><th>Подход / выезд, м</th><th>Цвет</th><th />
               </tr>
             </thead>
@@ -255,21 +256,21 @@ const counts = computed(() => ({
     </template>
     <template v-else>
       <section>
-        <h3>Файл модели JSON</h3>
+        <h3>Файл модели</h3>
         <div class="row wrap gap">
           <button class="btn primary" @click="exportModel">Скачать модель</button>
           <button class="btn" @click="fileInput?.click()">Загрузить модель</button>
           <input ref="fileInput" type="file" accept="application/json,.json" hidden @change="importModel" />
-          <button class="btn" @click="copyJson">Копировать JSON</button>
-          <button class="btn" @click="openJson">{{ showJson ? 'Скрыть JSON' : 'Править JSON' }}</button>
-          <button class="btn" @click="download('crossroad-model.schema.json', schemaText)">JSON Schema</button>
+          <button class="btn" @click="copyJson">Копировать текст</button>
+          <button class="btn" @click="openJson">{{ showJson ? 'Скрыть текст' : 'Править текст' }}</button>
+          <button class="btn" @click="download('crossroad-model.schema.json', schemaText)">Схема формата файла</button>
           <button class="btn" @click="download('model-format.md', docText, 'text/markdown')">Описание формата</button>
         </div>
-        <div class="small muted">Формат «crossroad-model», версия 2. Файлы первой версии с четырьмя подходами N, E, S, W открываются и переводятся автоматически.</div>
+        <div class="small muted">Файл содержит модель в текстовом формате. Сохранения первой версии с четырьмя подходами открываются и преобразуются автоматически.</div>
         <template v-if="showJson">
           <textarea v-model="jsonText" class="json-box" spellcheck="false" />
           <div class="row gap">
-            <button class="btn small primary" @click="applyJson">Применить JSON</button>
+            <button class="btn small primary" @click="applyJson">Применить изменения</button>
             <span v-if="jsonErr" class="small bad">{{ jsonErr }}</span>
           </div>
         </template>

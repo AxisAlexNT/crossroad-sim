@@ -1,5 +1,5 @@
 // Пул Web Worker'ов для параллельной оценки вариантов светофорной программы.
-import OptWorker from '../engine/optWorker?worker&inline';
+import { createCalculationWorker } from './calculationWorker';
 import type { EvalRequest, EvalResponse, EvaluationOutcome } from '../engine/evaluate';
 
 export class WorkerPool {
@@ -14,7 +14,7 @@ export class WorkerPool {
   constructor(n: number, wasm?: Uint8Array) {
     try {
     for (let i = 0; i < (Number.isFinite(n) ? Math.max(1, Math.min(8, Math.floor(n))) : 1); i++) {
-      const w = new OptWorker();
+      const w = createCalculationWorker('optimization');
       this.workers.push(w);
       w.onmessage = (e: MessageEvent<EvalResponse>) => {
         const p = this.pending.get(e.data.id);

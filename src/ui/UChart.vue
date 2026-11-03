@@ -12,6 +12,8 @@ const host = ref<HTMLDivElement | null>(null);
 let plot: uPlot | null = null;
 let ro: ResizeObserver | undefined;
 let zoomed = false;
+let lastWidth = 0;
+let resizeFrame = 0;
 
 function cssVar(n: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#888';
@@ -50,6 +52,7 @@ function build() {
       })),
     ],
   };
+  lastWidth = opts.width;
   plot = new uPlot(opts, data(), host.value);
   host.value.querySelector('.u-over')?.addEventListener('dblclick', () => { zoomed = false; plot?.setData(data(), true); });
 }
@@ -61,13 +64,17 @@ function data(): uPlot.AlignedData {
 onMounted(() => {
   build();
   ro = new ResizeObserver(() => {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => {
     if (!plot || !host.value || host.value.clientWidth < 10) return;
-    plot.setSize({ width: Math.max(200, host.value.clientWidth), height: props.height ?? 200 });
+    const width = Math.max(200, host.value.clientWidth);
+    if (width !== lastWidth) { lastWidth = width; plot.setSize({ width, height: props.height ?? 200 }); }
     if (pending) { pending = false; plot.setData(data(), !zoomed); }
+    });
   });
   if (host.value) ro.observe(host.value);
 });
-onBeforeUnmount(() => { ro?.disconnect(); plot?.destroy(); });
+onBeforeUnmount(() => { ro?.disconnect(); cancelAnimationFrame(resizeFrame); plot?.destroy(); });
 
 // скрытый график не перерисовывается, данные подставляются, когда он снова виден
 let pending = false;

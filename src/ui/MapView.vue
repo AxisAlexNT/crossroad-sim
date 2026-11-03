@@ -4,7 +4,7 @@
 // Режимы правки: связи полос, пешеходный граф, подходы (поворот, переход), остановки.
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { signalRemaining } from '../engine/signals';
-import { app, simRef } from './store';
+import { app, simRef, dialog } from './store';
 import { editor, useCtx, type Ctx } from './ctx';
 import { onRender, requestRender } from './loop';
 import { arrowLampPath, buildNodes, buildStatic, headLayout, pedOffsets, P, HEAD, type MapNode } from './mapdraw';
@@ -18,6 +18,8 @@ const C = useCtx(() => props.ctx);
 const cfg = C.cfg;
 const live = computed(() => !C.isEditor.value);
 const helpOpen = ref(false);
+const yieldLine = ref<SVGLineElement | null>(null);
+const interventionMarker = ref<SVGGElement | null>(null);
 
 const svgEl = ref<SVGSVGElement | null>(null);
 const dynVeh = ref<SVGGElement | null>(null);
@@ -149,6 +151,24 @@ function fit(all = false) {
   requestRender();
 }
 
+function mapKey(event: KeyboardEvent) {
+  if (app.migrationOpen || dialog.open || event.defaultPrevented || event.repeat || event.isComposing
+    || event.ctrlKey || event.altKey || event.metaKey) return;
+  if (event.key === 'Escape') { cancelGesture(); helpOpen.value = false; C.select(null); event.preventDefault(); return; }
+  if (event.target !== event.currentTarget || event.ctrlKey || event.altKey || event.metaKey) return;
+  const step = view.vw * .08;
+  if (event.key === '+' || event.key === '=') zoom(.8);
+  else if (event.key === '-') zoom(1.25);
+  else if (event.key === 'Home') fit();
+  else if (event.key === 'ArrowLeft') view.cx -= step;
+  else if (event.key === 'ArrowRight') view.cx += step;
+  else if (event.key === 'ArrowUp') view.cy += step;
+  else if (event.key === 'ArrowDown') view.cy -= step;
+  else return;
+  event.preventDefault();
+  requestRender();
+}
+
 function zoom(k: number, around?: { x: number; y: number }) {
   const c = around ?? { x: view.cx, y: view.cy };
   const nv = Math.max(15, Math.min(1500, view.vw * k));
@@ -260,6 +280,20 @@ function projectOnArm(arm: ArmId, w: { x: number; y: number }) {
 
 function armCfg(id: ArmId) {
   return cfg.value.arms.find((a) => a.id === id)!;
+}
+
+function cancelGesture() {
+  drag.active = false;
+  drag.kind = '';
+  drag.node = null;
+  drag.moved = false;
+  pinchStart = null;
+  const captured = [...pointers.keys()];
+  pointers.clear();
+  for (const id of captured) {
+    if (svgEl.value?.hasPointerCapture(id)) svgEl.value.releasePointerCapture(id);
+  }
+  requestRender();
 }
 
 function onPointerUp(e: PointerEvent) {
@@ -461,10 +495,28 @@ function render(alpha: number) {
   const sim = simRef.value;
   if (!sim || !dynVeh.value) return;
   const st = sim.st;
+  const intervention = st.status.lastIntervention;
+  if (interventionMarker.value) {
+    interventionMarker.value.style.display = intervention && st.t - intervention.t < 120 ? '' : 'none';
+    if (intervention) {
+      interventionMarker.value.setAttribute('transform', `translate(${intervention.x},${-intervention.y})`);
+      interventionMarker.value.querySelector('title')!.textContent = `${intervention.text} · ${intervention.t.toFixed(0)} с`;
+    }
+  }
   let i = 0, m = 0;
   const flashOn = Math.floor(st.t * 2) % 2 === 0;
   const colors = armColors.value;
   const deadlocked = new Set(st.status.deadlock?.vids ?? []);
+  const selection = C.selected.value;
+  const selectedVehicle = selection?.kind === 'vehicle' ? st.vehicles.find(v => v.id === selection.id) : undefined;
+  const recipient = selectedVehicle?.why === 'yield' ? st.vehicles.find(v => v.id === selectedVehicle.yieldTo) : undefined;
+  if (yieldLine.value) {
+    yieldLine.value.style.display = recipient && selectedVehicle ? '' : 'none';
+    if (recipient && selectedVehicle) {
+      yieldLine.value.setAttribute('x1', String(selectedVehicle.x)); yieldLine.value.setAttribute('y1', String(-selectedVehicle.y));
+      yieldLine.value.setAttribute('x2', String(recipient.x)); yieldLine.value.setAttribute('y2', String(-recipient.y));
+    }
+  }
   for (const v of st.vehicles) {
     const g = ensureVeh(i++);
     const x = v.px + (v.x - v.px) * alpha;
@@ -490,6 +542,7 @@ function render(alpha: number) {
     label.textContent = v.route ? routeNames.value[v.route] ?? '' : '';
     if (v.route) label.setAttribute('transform', Math.cos(h) < -0.05 ? 'rotate(180)' : '');
     let cls = 'veh';
+    if (recipient?.id === v.id) cls += ' yield-recipient';
     if (v.crashed) cls += ' crashed';
     else if (v.error) cls += ' wrong';
     else if (deadlocked.has(v.id)) cls += ' locked';
@@ -584,6 +637,16 @@ onMounted(() => {
   requestRender();
 });
 onBeforeUnmount(() => { off?.(); ro?.disconnect(); });
+watch(C.selected, selection => {
+  if (live.value && selection?.kind === 'vehicle') {
+    const vehicle = simRef.value?.st.vehicles.find(v => v.id === selection.id);
+    const height = view.vw * view.h / Math.max(1, view.w);
+    if (vehicle && (Math.abs(vehicle.x - view.cx) > view.vw * .45 || Math.abs(vehicle.y - view.cy) > height * .45)) {
+      view.cx = vehicle.x; view.cy = vehicle.y;
+    }
+  }
+  requestRender();
+});
 watch(() => app.version, () => { lastLampKey = ''; requestRender(); });
 watch(() => [app.highlightVid, app.conflictMode, app.showGraph, app.showTimers], () => { lastLampKey = ''; requestRender(); });
 watch(() => cfg.value.arms.map((a) => a.id + a.angle).join(), () => setTimeout(() => fit(), 350));
@@ -615,11 +678,13 @@ function cycleConflicts() {
   app.conflictMode = app.conflictMode === 'off' ? 'all' : app.conflictMode === 'all' ? 'current' : 'off';
 }
 const conflictTitle = computed(() => ({ off: 'Точки конфликтов: показать все', all: 'Точки конфликтов: все. Нажмите, чтобы оставить возможные при текущих сигналах', current: 'Точки конфликтов: возможные при текущих сигналах. Нажмите, чтобы скрыть' }[app.conflictMode]));
-defineExpose({ svgEl, fit });
+function toggleHelp() { helpOpen.value = !helpOpen.value; }
+function closeHelp() { helpOpen.value = false; }
+defineExpose({ svgEl, fit, toggleHelp, closeHelp });
 </script>
 
 <template>
-  <div ref="wrap" class="map-wrap">
+  <div ref="wrap" class="map-wrap" tabindex="0" aria-label="Карта перекрёстка. Плюс и минус изменяют масштаб, стрелки перемещают карту, Домой показывает перекрёсток." @keydown="mapKey">
     <svg
       ref="svgEl"
       class="map"
@@ -628,7 +693,8 @@ defineExpose({ svgEl, fit });
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
+      @pointercancel="cancelGesture"
+      @lostpointercapture="cancelGesture"
       @dblclick="onDblClick"
       @wheel="onWheel"
     >
@@ -677,6 +743,10 @@ defineExpose({ svgEl, fit });
       <g v-if="live" ref="dynPed" class="dyn-ped" />
       <g v-if="live" ref="dynVeh" class="dyn-veh" />
       <g v-if="live" ref="dynMarks" class="dyn-marks" />
+      <line v-if="live" ref="yieldLine" class="yield-link" style="display: none" />
+      <g v-if="live" ref="interventionMarker" class="intervention-marker" style="display: none">
+        <title>Вмешательство модели</title><circle r="3" /><text y="-4" text-anchor="middle">Вмешательство модели</text>
+      </g>
 
       <g class="heads">
         <g v-for="h in heads" :key="h.key" :data-group="h.group" :transform="`translate(${h.x},${h.y})`" class="head" :class="[h.kind, { sel: selected?.kind === 'group' && selected.id === h.group }]" data-lamp="R">
@@ -759,6 +829,7 @@ defineExpose({ svgEl, fit });
       <button :class="{ on: helpOpen }" title="Что означают значки" aria-label="Что означают значки" @click="helpOpen = !helpOpen">?</button>
     </div>
     <div v-if="helpOpen" class="map-help" role="dialog" aria-label="Значки карты" @click="helpOpen = false">
+      <p v-if="live" class="small">На вкладке «Симуляция», вне полей ввода и кнопок: пробел — пуск или пауза; ← / → — на секунду назад или вперёд; 1–6 — скорости ×1, ×2, ×5, ×10, ×60, ×600; F (А) — перекрёсток; T (Е) — таймеры; ? — эта справка; Escape — закрыть справку и снять выбор. На карте стрелки перемещают вид. При открытом диалоге сочетания отключены.</p>
       <table>
         <tbody>
           <tr><td>＋ －</td><td>приблизить и отдалить, также колесом мыши или двумя пальцами</td></tr>

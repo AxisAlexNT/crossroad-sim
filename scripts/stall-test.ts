@@ -41,6 +41,7 @@ const saveReport = () => { if (output) writeFileSync(output, JSON.stringify(repo
 function run(label: string, base: ModelConfig, seed: number): Finding[] {
   const cfg = structuredClone(base);
   cfg.sim.seed = seed;
+  if (strict) { cfg.sim.mode = 'strict'; cfg.sim.diagnosticRecovery = false; }
   const { code, errors } = compileModel(cfg);
   if (errors.length) throw new Error(errors.join('\n'));
   const sim = new Simulation(cfg, code, { headless: true });
@@ -102,7 +103,7 @@ const st = (sim: Simulation) => `проехало ${sim.st.counters.crossedStop}
 
 const cases: Array<[string, () => ModelConfig]> = [
   ...PRESETS.map((p) => [p.id, () => defaultModel(p.id)] as [string, () => ModelConfig]),
-  ...TEMPLATES.slice(1).map((t) => ['шаблон ' + t.id, t.make] as [string, () => ModelConfig]),
+  ...TEMPLATES.filter(t => t.id !== 'kolpino' && !PRESETS.some(p => p.id === t.id)).map((t) => ['шаблон ' + t.id, t.make] as [string, () => ModelConfig]),
 ];
 const found: Finding[] = [];
 const picked = cases.filter(([l]) => !only || l.includes(only));

@@ -48,9 +48,27 @@ try {
   const sim = new Simulation(cfg, compileModel(cfg).code, { headless: true });
   try {
     sim.runUntil(28.6);
-    const entering = sim.st.vehicles.find(v => v.origin === 'S' && v.dest === 'W')!;
-    const clearing = sim.st.vehicles.find(v => v.origin === 'E' && v.dest === 'S' && v.phase === 'conn')!;
-    assert.ok(entering && clearing);
+    const base = sim.st.vehicles[0]; assert.ok(base);
+    const enteringConn = sim.net.conns.find(c => c.conn.id === 'S0-W0' && c.variant === 0)!;
+    const clearingConn = sim.net.conns.find(c => c.conn.id === 'E0-S0' && c.variant === 0)!;
+    assert.ok(enteringConn && clearingConn);
+    // Геометрия регрессии задана явно: ранние изменения очереди не должны
+    // менять смысл проверки освобождения предыдущей фазы.
+    const entering: Vehicle = { ...structuredClone(base), id: 10011, origin: 'S', dest: 'W',
+      phase: 'approach', conn: enteringConn.idx, lane: 0, targetLane: 0, lcT: -1,
+      s: 143.46371794318597, v: 5.167299936855759, len: 4.820733039919287, wid: 1.8,
+      lat: -0.9588839360512793, lat2: 0.1841764273121953, committed: [], acceptedGrants: undefined,
+      route: null, inBay: false, bayT: 0, bayShift: 0, crashed: false, risky: false,
+      yieldingAt: -1, yieldTo: -1, entryPermit: 'none', tStop: -1 };
+    const clearing: Vehicle = { ...structuredClone(base), id: 10012, origin: 'E', dest: 'S',
+      phase: 'conn', conn: clearingConn.idx, lane: 0, targetLane: 0, lcT: -1,
+      s: 21.487008508985703, v: 0.25698820024289853, a: -0.25070859868678597,
+      len: 4.322891010949388, wid: 1.8, lat: 0.8024461846798658, lat2: 0.12037246255204082,
+      committed: [], acceptedGrants: undefined, route: null, inBay: false, bayT: 0, bayShift: 0,
+      crashed: false, risky: false, yieldingAt: -1, yieldTo: -1, entryPermit: 'main', tStop: 21.8 };
+    sim.st.vehicles = [entering, clearing]; sim.st.peds = [];
+    sim.permit[entering.conn] = 'main'; sim.permit[clearing.conn] = 'none';
+    sim.pose(entering); sim.pose(clearing);
     const cr = sim.net.conns[entering.conn].conflicts.find(ref => ref.other === clearing.conn)!; assert.ok(cr);
     const internal = sim as unknown as { index(): void; sweepHits(v: Vehicle, ci: number, start: number, end: number, o: Vehicle): boolean; mustWait(v: Vehicle, ci: number, cr: ConflictRef, start: number, end: number): boolean };
     internal.index();

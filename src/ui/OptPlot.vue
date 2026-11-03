@@ -12,6 +12,7 @@ const emit = defineEmits<{ (e: 'update:x', v: string): void; (e: 'update:y', v: 
 const cv = ref<HTMLCanvasElement | null>(null);
 const tip = ref('');
 let ro: ResizeObserver | undefined;
+let resizeFrame = 0;
 let hits: Array<{ px: number; py: number; i: number }> = [];
 
 const xs = computed({ get: () => props.x, set: (v) => emit('update:x', v) });
@@ -230,22 +231,22 @@ function onClick(e: PointerEvent) {
 }
 
 onMounted(() => {
-  ro = new ResizeObserver(() => draw());
+  ro = new ResizeObserver(() => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(draw); });
   if (cv.value) ro.observe(cv.value);
   draw();
 });
-onBeforeUnmount(() => ro?.disconnect());
+onBeforeUnmount(() => { ro?.disconnect(); cancelAnimationFrame(resizeFrame); });
 watch(() => [props.tick, props.x, props.y, props.z, props.mode, app.theme, props.points.length], () => draw());
 </script>
 
 <template>
   <div class="opt-plot">
     <div class="axes">
-      <label>Ось X <select v-model="xs"><option v-for="a in axes" :key="a.id" :value="a.id">{{ a.label }}</option></select></label>
-      <label>Ось Y <select v-model="ys"><option v-for="a in axes" :key="a.id" :value="a.id">{{ a.label }}</option></select></label>
-      <label v-if="mode === 'contour'">Высота и цвет, ось Z <select v-model="zs"><option v-for="a in axes" :key="a.id" :value="a.id">{{ a.label }}</option></select></label>
+      <label>Горизонтальная ось <select v-model="xs"><option v-for="a in axes" :key="a.id" :value="a.id">{{ a.label }}</option></select></label>
+      <label>Вертикальная ось <select v-model="ys"><option v-for="a in axes" :key="a.id" :value="a.id">{{ a.label }}</option></select></label>
+      <label v-if="mode === 'contour'">Высота и цвет, третья ось <select v-model="zs"><option v-for="a in axes" :key="a.id" :value="a.id">{{ a.label }}</option></select></label>
     </div>
     <canvas ref="cv" @pointermove="onMove" @pointerdown="onClick" @pointerleave="tip = ''" />
-    <div class="tip">{{ tip || (mode === 'contour' ? 'Цвет — значение Z, интерполированное между точками, линии — уровни Z. Точки — оценённые варианты.' : 'Зелёные — недоминируемые варианты, красные — нарушают ограничения. Нажмите на точку, чтобы найти её в таблице.') }}</div>
+    <div class="tip">{{ tip || (mode === 'contour' ? 'Цвет — значение третьего показателя, интерполированное между точками, линии — уровни третьего показателя. Точки — оценённые варианты.' : 'Зелёные — недоминируемые варианты, красные — нарушают ограничения. Нажмите на точку, чтобы найти её в таблице.') }}</div>
   </div>
 </template>

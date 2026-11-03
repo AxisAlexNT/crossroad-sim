@@ -52,6 +52,7 @@ export const SIM_DEFAULT: SimSettings = {
   deadlockSeconds: 15,
   deadlockBreak: 0,
   diagnosticRecovery: false,
+  mode: 'strict',
   slowdownWindow: 120,
   slowdownRatio: 0.5,
   noProgressSeconds: 90,

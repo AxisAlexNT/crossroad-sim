@@ -2,6 +2,7 @@ import '../polyfills';
 import { initSandbox } from './sandbox';
 import { InteractiveRuntime, type InteractiveRequest, type InteractiveReply } from './interactiveRuntime';
 
+export function installInteractiveWorker() {
 const runtime = new InteractiveRuntime();
 let ready: Promise<unknown> = Promise.resolve();
 let sandboxError: string | null = null;
@@ -22,3 +23,5 @@ self.onmessage = (event: MessageEvent<Request>) => {
     self.postMessage(reply);
   });
 };
+
+}

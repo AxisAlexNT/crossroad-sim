@@ -190,7 +190,7 @@ const pct = (x: number) => `${(x / Math.max(1, tl.value.cycle)) * 100}%`;
     <details class="sub">
       <summary>Адаптивное управление кодом</summary>
       <label class="check"><input type="radio" value="fixed" v-model="sig.controller" /> Жёсткая программа, фазы по кругу</label>
-      <label class="check"><input type="radio" value="code" v-model="sig.controller" /> Код TypeScript: nextPhase() и phaseDuration()</label>
+      <label class="check"><input type="radio" value="code" v-model="sig.controller" /> Пользовательский код смены фаз</label>
       <NodeCode :code="sig.code" :manual="sig.controller === 'code'" fn-name="nextPhase" @apply="applyControllerCode" @regen="regenController(cfg)" />
     </details>
   </div>

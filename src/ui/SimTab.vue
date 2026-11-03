@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
 import MapView from './MapView.vue';
 import Inspector from './Inspector.vue';
 import PhaseEditor from './PhaseEditor.vue';
 import UChart from './UChart.vue';
-import { app, simRef } from './store';
+import { app, simRef, dialog } from './store';
 import { pause, play, restart, stepPhase, stepSeconds, onSlowTick } from './loop';
 import { chartsFor } from './charts';
 
@@ -28,7 +28,38 @@ const series = computed(() => { void chartTick.value; void app.version; return s
 const mini = computed(() => { void app.version; return chartsFor(app.cfg).filter((c) => c.id === 'wait' || c.id === 'queue'); });
 const panel = ref<'signals' | 'inspector'>('signals');
 const s = computed(() => { void app.statTick; return app.stats; });
+const interventions = computed(() => { void app.statTick; return simRef.value?.st.counters.interventions ?? 0; });
 function setSpeed(v: number) { app.speed = Math.max(1, Math.round(v)); }
+function simulationKey(event: KeyboardEvent) {
+  if (app.tab !== 'sim' || event.defaultPrevented || event.repeat || event.isComposing
+    || event.ctrlKey || event.altKey || event.metaKey || (event.shiftKey && event.key !== '?')
+    || dialog.open || app.migrationOpen) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest('input, textarea, select, button, a, summary, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .cm-editor')) return;
+  if (document.querySelector('[role="dialog"]:not(.map-help)')) return;
+  if (document.querySelector('.map-help') && event.key !== 'Escape') return;
+  if (event.key === ' ') app.playing ? pause() : play();
+  else if (event.key === 'ArrowLeft' && !target?.closest('.map-wrap')) stepSeconds(-1);
+  else if (event.key === 'ArrowRight' && !target?.closest('.map-wrap')) stepSeconds(1);
+  else if (/^[1-6]$/.test(event.key)) setSpeed(SPEEDS[Number(event.key) - 1]);
+  else if (event.code === 'KeyF' || event.key.toLowerCase() === 'f') mapRef.value?.fit();
+  else if (event.code === 'KeyT' || event.key.toLowerCase() === 't') app.showTimers = !app.showTimers;
+  else if (event.key === '?') mapRef.value?.toggleHelp();
+  else if (event.key === 'Escape') { mapRef.value?.closeHelp(); app.selected = null; }
+  else return;
+  event.preventDefault();
+}
+onMounted(() => window.addEventListener('keydown', simulationKey));
+onBeforeUnmount(() => window.removeEventListener('keydown', simulationKey));
+function newRandomRun() {
+  pause();
+  const previous = app.cfg.sim.seed;
+  const random = new Uint32Array(1);
+  crypto.getRandomValues(random);
+  app.cfg.sim.seed = (random[0] % 2147483646) + 1;
+  if (app.cfg.sim.seed === previous) app.cfg.sim.seed = previous % 2147483646 + 1;
+  restart();
+}
 function openLimits() {
   app.aboutAnchor = 'limits';
   app.tab = 'about';
@@ -39,18 +70,18 @@ function openLimits() {
   <div class="sim-tab">
     <div class="sim-main">
       <div v-if="!app.bannerClosed" class="limits-banner" role="note">
-        <span>Экспериментальная модель с условными интенсивностями, геометрией и программами светофоров, при её создании использовались ИИ-агенты.
-          Результаты нужно проверять, учитывайте <a href="#limits" @click.prevent="openLimits">ограничения модели</a>.</span>
+        <span>При создании модели использовались ИИ-агенты. Результаты требуют проверки. Учитывайте <a href="#limits" @click.prevent="openLimits">ограничения модели</a>.</span>
         <button class="banner-close" title="Скрыть плашку" aria-label="Скрыть плашку" @click="app.bannerClosed = true">✕</button>
       </div>
       <div v-if="!app.hintClosed" class="quick-hint" role="note">
-        <span><b>Как начать:</b> выберите вариант программы в панели «Светофор и фазы» → ▶ → вкладка «Графики». Значок ? на карте объясняет кнопки.</span>
+        <span><b>Как начать:</b> выберите программу и нажмите ▶. Сравнение — во вкладке «Графики», подсказки — на кнопке ? карты.</span>
         <button class="banner-close" title="Скрыть подсказку" aria-label="Скрыть подсказку" @click="app.hintClosed = true">✕</button>
       </div>
       <MapView ref="mapRef" class="sim-map" />
       <div class="controls">
         <div class="ctl-row">
           <div class="row gap ctl-buttons">
+            <button class="btn small" title="Начать заново с другим набором случайных условий" @click="newRandomRun">Новый случайный прогон</button>
             <button class="btn icon" title="Сначала" @click="restart">⏮</button>
             <button class="btn icon" title="Назад до предыдущего переключения сигналов" @click="stepPhase(-1)">⏪</button>
             <button class="btn icon" title="Назад на 1 с" @click="stepSeconds(-1)">−1с</button>
@@ -70,12 +101,15 @@ function openLimits() {
           </div>
         </div>
         <div class="status-line" aria-live="off">
+          <span :title="'Одинаковый номер и одинаковые настройки дают одинаковый прогон'">Прогон № {{ app.cfg.sim.seed }}</span>
           <span class="clock">{{ fmt(s.t) }}</span>
           <span class="phase-now" :title="`${s.phase} · ${s.segment}`">{{ s.phase }} · {{ s.segment }}</span>
           <span class="seg-left">ещё {{ Math.ceil(s.segLeft) }} с</span>
           <span class="lag" :class="{ shown: s.lag }" title="Устройство не успевает с такой скоростью, показывается максимально возможная">не успевает: ×{{ s.realSpeed.toFixed(1) }}</span>
         </div>
         <div class="status-badges">
+          <span class="sbadge" :class="app.cfg.sim.mode === 'visual' ? 'warn' : 'ok'">{{ app.cfg.sim.mode === 'visual' ? 'Наглядный режим: возможно вмешательство модели' : 'Строгий расчёт без вмешательств' }}</span>
+          <span v-if="interventions" class="sbadge warn">Вмешательств модели: {{ interventions }}. Прогон не подходит для подбора светофорной программы.</span>
           <span v-if="s.deadlock" class="sbadge bad" :title="s.deadlock">Взаимная блокировка с {{ fmt(s.deadlockSince) }}: {{ s.deadlock }}</span>
           <span v-if="s.stall" class="sbadge bad">Нет проезда: {{ s.stall }}</span>
           <span v-if="s.slow" class="sbadge warn">Скорость падает: {{ s.slow }}</span>

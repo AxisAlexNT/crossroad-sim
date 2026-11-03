@@ -1,0 +1,1349 @@
+{
+  "format": "crossroad-model",
+  "version": 2,
+  "name": "Проработанная модель",
+  "description": "Перекрёсток с дополнительными секциями светофоров, отдельными направлениями для автобусов и настроенными потоками движения. Все параметры доступны для изменения.",
+  "arms": [
+    {
+      "id": "E",
+      "name": "Оборонная улица, восток",
+      "short": "восток",
+      "angle": 0,
+      "inLanes": 3,
+      "outLanes": 2,
+      "laneWidth": 3.6,
+      "medianWidth": 3,
+      "axisShift": 0,
+      "crosswalkOffset": 22,
+      "crosswalkWidth": 4,
+      "stopLineGap": 1.5,
+      "approachLength": 170,
+      "solidLength": 30,
+      "exitLength": 120,
+      "speedLimit": 60,
+      "hasCrosswalk": true,
+      "refuge": true,
+      "color": "#22a387"
+    },
+    {
+      "id": "N",
+      "name": "Тверская улица, север",
+      "short": "север",
+      "angle": 90,
+      "inLanes": 2,
+      "outLanes": 1,
+      "laneWidth": 3.3,
+      "medianWidth": 2,
+      "axisShift": 0,
+      "crosswalkOffset": 24,
+      "crosswalkWidth": 4,
+      "stopLineGap": 1.5,
+      "approachLength": 90,
+      "solidLength": 25,
+      "exitLength": 110,
+      "speedLimit": 60,
+      "hasCrosswalk": true,
+      "refuge": true,
+      "color": "#4f8cff"
+    },
+    {
+      "id": "W",
+      "name": "Оборонная улица, запад",
+      "short": "запад",
+      "angle": 180,
+      "inLanes": 3,
+      "outLanes": 3,
+      "laneWidth": 3.75,
+      "medianWidth": 2.5,
+      "axisShift": 0,
+      "crosswalkOffset": 20,
+      "crosswalkWidth": 4,
+      "stopLineGap": 1.5,
+      "approachLength": 160,
+      "solidLength": 39,
+      "exitLength": 120,
+      "speedLimit": 60,
+      "hasCrosswalk": true,
+      "refuge": true,
+      "color": "#d4455f"
+    },
+    {
+      "id": "S",
+      "name": "Подъезд к Колпино, юг",
+      "short": "юг",
+      "angle": 260,
+      "inLanes": 1,
+      "outLanes": 1,
+      "laneWidth": 4.5,
+      "medianWidth": 0,
+      "axisShift": 0,
+      "crosswalkOffset": 23.5,
+      "crosswalkWidth": 4,
+      "stopLineGap": 1.5,
+      "approachLength": 150,
+      "solidLength": 25,
+      "exitLength": 150,
+      "speedLimit": 60,
+      "hasCrosswalk": true,
+      "refuge": false,
+      "color": "#f2a33a"
+    }
+  ],
+  "connections": [
+    {
+      "id": "W0-N0",
+      "from": {
+        "arm": "W",
+        "lane": 0
+      },
+      "to": {
+        "arm": "N",
+        "lane": 0
+      }
+    },
+    {
+      "id": "W0-E0",
+      "from": {
+        "arm": "W",
+        "lane": 0
+      },
+      "to": {
+        "arm": "E",
+        "lane": 0
+      }
+    },
+    {
+      "id": "W1-E1",
+      "from": {
+        "arm": "W",
+        "lane": 1
+      },
+      "to": {
+        "arm": "E",
+        "lane": 1
+      }
+    },
+    {
+      "id": "W2-S0",
+      "from": {
+        "arm": "W",
+        "lane": 2
+      },
+      "to": {
+        "arm": "S",
+        "lane": 0
+      }
+    },
+    {
+      "id": "E0-S0",
+      "from": {
+        "arm": "E",
+        "lane": 0
+      },
+      "to": {
+        "arm": "S",
+        "lane": 0
+      }
+    },
+    {
+      "id": "E0-W0",
+      "from": {
+        "arm": "E",
+        "lane": 0
+      },
+      "to": {
+        "arm": "W",
+        "lane": 0
+      }
+    },
+    {
+      "id": "E1-W1",
+      "from": {
+        "arm": "E",
+        "lane": 1
+      },
+      "to": {
+        "arm": "W",
+        "lane": 1
+      }
+    },
+    {
+      "id": "E2-N0",
+      "from": {
+        "arm": "E",
+        "lane": 2
+      },
+      "to": {
+        "arm": "N",
+        "lane": 0
+      }
+    },
+    {
+      "id": "N0-S0",
+      "from": {
+        "arm": "N",
+        "lane": 0
+      },
+      "to": {
+        "arm": "S",
+        "lane": 0
+      }
+    },
+    {
+      "id": "N0-E0",
+      "from": {
+        "arm": "N",
+        "lane": 0
+      },
+      "to": {
+        "arm": "E",
+        "lane": 0
+      },
+      "busOnly": true
+    },
+    {
+      "id": "S0-N0",
+      "from": {
+        "arm": "S",
+        "lane": 0
+      },
+      "to": {
+        "arm": "N",
+        "lane": 0
+      }
+    },
+    {
+      "id": "S0-W0",
+      "from": {
+        "arm": "S",
+        "lane": 0
+      },
+      "to": {
+        "arm": "W",
+        "lane": 0
+      }
+    },
+    {
+      "id": "S0-E1",
+      "from": {
+        "arm": "S",
+        "lane": 0
+      },
+      "to": {
+        "arm": "E",
+        "lane": 1
+      }
+    },
+    {
+      "id": "S0-E0",
+      "from": {
+        "arm": "S",
+        "lane": 0
+      },
+      "to": {
+        "arm": "E",
+        "lane": 0
+      }
+    },
+    {
+      "id": "N1-W2",
+      "from": {
+        "arm": "N",
+        "lane": 1
+      },
+      "to": {
+        "arm": "W",
+        "lane": 2
+      }
+    },
+    {
+      "id": "N1-S0",
+      "from": {
+        "arm": "N",
+        "lane": 1
+      },
+      "to": {
+        "arm": "S",
+        "lane": 0
+      },
+      "busOnly": true
+    },
+    {
+      "id": "S0-W1",
+      "from": {
+        "arm": "S",
+        "lane": 0
+      },
+      "to": {
+        "arm": "W",
+        "lane": 1
+      }
+    },
+    {
+      "id": "E1-W2",
+      "from": {
+        "arm": "E",
+        "lane": 1
+      },
+      "to": {
+        "arm": "W",
+        "lane": 2
+      }
+    },
+    {
+      "id": "N1-W1",
+      "from": {
+        "arm": "N",
+        "lane": 1
+      },
+      "to": {
+        "arm": "W",
+        "lane": 1
+      }
+    },
+    {
+      "id": "N0-E1",
+      "from": {
+        "arm": "N",
+        "lane": 0
+      },
+      "to": {
+        "arm": "E",
+        "lane": 1
+      },
+      "busOnly": true
+    }
+  ],
+  "peds": {
+    "nodes": [
+      {
+        "id": "NE",
+        "kind": "corner",
+        "arms": [
+          "E",
+          "N"
+        ],
+        "label": "северо-восточный угол",
+        "dx": 0,
+        "dy": 0
+      },
+      {
+        "id": "NW",
+        "kind": "corner",
+        "arms": [
+          "N",
+          "W"
+        ],
+        "label": "северо-западный угол",
+        "dx": 0,
+        "dy": 0
+      },
+      {
+        "id": "SW",
+        "kind": "corner",
+        "arms": [
+          "W",
+          "S"
+        ],
+        "label": "юго-западный угол",
+        "dx": 0,
+        "dy": 0
+      },
+      {
+        "id": "SE",
+        "kind": "corner",
+        "arms": [
+          "S",
+          "E"
+        ],
+        "label": "юго-восточный угол",
+        "dx": 0,
+        "dy": 0
+      },
+      {
+        "id": "IW",
+        "kind": "island",
+        "arms": [
+          "W"
+        ],
+        "label": "островок на Оборонной с запада",
+        "dx": 0,
+        "dy": 0
+      }
+    ],
+    "edges": [
+      {
+        "id": "NE~NW",
+        "from": "NE",
+        "to": "NW",
+        "width": 4
+      },
+      {
+        "id": "SW~IW",
+        "from": "SW",
+        "to": "IW",
+        "width": 4
+      },
+      {
+        "id": "IW~NW",
+        "from": "IW",
+        "to": "NW",
+        "width": 4
+      },
+      {
+        "id": "SW~SE",
+        "from": "SW",
+        "to": "SE",
+        "width": 4
+      },
+      {
+        "id": "SE~NE",
+        "from": "SE",
+        "to": "NE",
+        "width": 4
+      }
+    ],
+    "sources": [
+      {
+        "node": "NW",
+        "rate": 82,
+        "groups": [
+          {
+            "size": 1,
+            "share": 0.7
+          },
+          {
+            "size": 2,
+            "share": 0.22
+          },
+          {
+            "size": 3,
+            "share": 0.06
+          },
+          {
+            "size": 4,
+            "share": 0.02
+          }
+        ],
+        "speedMin": 1,
+        "speedMax": 1.6,
+        "destinations": {
+          "SE": 0.55,
+          "NE": 0.36,
+          "SW": 0.09
+        }
+      },
+      {
+        "node": "NE",
+        "rate": 105,
+        "groups": [
+          {
+            "size": 1,
+            "share": 0.7
+          },
+          {
+            "size": 2,
+            "share": 0.22
+          },
+          {
+            "size": 3,
+            "share": 0.06
+          },
+          {
+            "size": 4,
+            "share": 0.02
+          }
+        ],
+        "speedMin": 1,
+        "speedMax": 1.6,
+        "destinations": {
+          "SE": 0.57,
+          "NW": 0.29,
+          "SW": 0.14
+        }
+      },
+      {
+        "node": "SE",
+        "rate": 112,
+        "groups": [
+          {
+            "size": 1,
+            "share": 0.7
+          },
+          {
+            "size": 2,
+            "share": 0.22
+          },
+          {
+            "size": 3,
+            "share": 0.06
+          },
+          {
+            "size": 4,
+            "share": 0.02
+          }
+        ],
+        "speedMin": 1,
+        "speedMax": 1.6,
+        "destinations": {
+          "NE": 0.53,
+          "NW": 0.4,
+          "SW": 0.07
+        }
+      },
+      {
+        "node": "SW",
+        "rate": 30,
+        "groups": [
+          {
+            "size": 1,
+            "share": 0.7
+          },
+          {
+            "size": 2,
+            "share": 0.22
+          },
+          {
+            "size": 3,
+            "share": 0.06
+          },
+          {
+            "size": 4,
+            "share": 0.02
+          }
+        ],
+        "speedMin": 1,
+        "speedMax": 1.6,
+        "destinations": {
+          "NE": 0.5,
+          "NW": 0.25,
+          "SE": 0.25
+        }
+      }
+    ]
+  },
+  "signals": {
+    "groups": [
+      {
+        "id": "N",
+        "name": "Тверская с севера",
+        "kind": "vehicle",
+        "arm": "N",
+        "movements": [
+          "N0-S0",
+          "N0-E0",
+          "N1-S0",
+          "N0-E1"
+        ],
+        "color": "#4f8cff"
+      },
+      {
+        "id": "S",
+        "name": "Подъезд с юга",
+        "kind": "vehicle",
+        "arm": "S",
+        "movements": [
+          "S0-N0",
+          "S0-W0",
+          "S0-E1",
+          "S0-E0",
+          "S0-W1"
+        ],
+        "color": "#f2a33a",
+        "pedInfo": true
+      },
+      {
+        "id": "W",
+        "name": "Оборонная с запада",
+        "kind": "vehicle",
+        "arm": "W",
+        "movements": [
+          "W0-E0",
+          "W1-E1"
+        ],
+        "color": "#d4455f"
+      },
+      {
+        "id": "E",
+        "name": "Оборонная с востока",
+        "kind": "vehicle",
+        "arm": "E",
+        "movements": [
+          "E0-W0",
+          "E1-W1",
+          "E1-W2"
+        ],
+        "color": "#22a387",
+        "pedInfo": true
+      },
+      {
+        "id": "PN",
+        "name": "Пешеходы через Тверскую",
+        "kind": "pedestrian",
+        "arm": "N",
+        "movements": [
+          "NE~NW"
+        ],
+        "color": "#9aa3b2"
+      },
+      {
+        "id": "PW",
+        "name": "Пешеходы через Оборонную к западу",
+        "kind": "pedestrian",
+        "arm": "W",
+        "movements": [
+          "SW~IW",
+          "IW~NW"
+        ],
+        "color": "#9aa3b2"
+      },
+      {
+        "id": "PS",
+        "name": "Пешеходы через подъезд к Колпино",
+        "kind": "pedestrian",
+        "arm": "S",
+        "movements": [
+          "SW~SE"
+        ],
+        "color": "#9aa3b2"
+      },
+      {
+        "id": "PE",
+        "name": "Пешеходы через Оборонную к востоку",
+        "kind": "pedestrian",
+        "arm": "E",
+        "movements": [
+          "SE~NE"
+        ],
+        "color": "#9aa3b2"
+      },
+      {
+        "id": "Wr",
+        "name": "Допсекция направо: Оборонная с запада",
+        "kind": "arrow",
+        "arm": "W",
+        "movements": [
+          "W2-S0"
+        ],
+        "color": "#b23a51",
+        "parent": "W",
+        "side": "right"
+      },
+      {
+        "id": "Wl",
+        "name": "Допсекция налево: Оборонная с запада",
+        "kind": "arrow",
+        "arm": "W",
+        "movements": [
+          "W0-N0"
+        ],
+        "color": "#ff6b8b",
+        "parent": "W",
+        "side": "left"
+      },
+      {
+        "id": "El",
+        "name": "Допсекция налево: Оборонная с востока",
+        "kind": "arrow",
+        "arm": "E",
+        "movements": [
+          "E0-S0"
+        ],
+        "color": "#ff6b8b",
+        "parent": "E",
+        "side": "left"
+      },
+      {
+        "id": "Nr",
+        "name": "Допсекция направо: Тверская с севера",
+        "kind": "arrow",
+        "arm": "N",
+        "movements": [
+          "N1-W2",
+          "N1-W1"
+        ],
+        "color": "#b23a51",
+        "parent": "N",
+        "side": "right"
+      },
+      {
+        "id": "GN129",
+        "name": "Светофор, север",
+        "kind": "vehicle",
+        "arm": "N",
+        "movements": [
+          "N1-S0"
+        ],
+        "color": "#6d5593"
+      },
+      {
+        "id": "Er",
+        "name": "Допсекция направо: Оборонная с востока",
+        "kind": "arrow",
+        "arm": "E",
+        "movements": [
+          "E2-N0"
+        ],
+        "color": "#b23a51",
+        "parent": "E",
+        "side": "right"
+      }
+    ],
+    "phases": [
+      {
+        "id": "ph28347",
+        "name": "1: Подъезд к Колпино I",
+        "duration": 25,
+        "green": [
+          "Wr",
+          "S",
+          "Nr",
+          "PE"
+        ]
+      },
+      {
+        "id": "ph76361",
+        "name": "1,5: Тверская ОТ",
+        "duration": 3,
+        "green": [
+          "GN129",
+          "PW"
+        ]
+      },
+      {
+        "id": "1",
+        "name": "2: Тверская",
+        "duration": 20,
+        "green": [
+          "N",
+          "PW",
+          "GN129",
+          "Er"
+        ]
+      },
+      {
+        "id": "ph83711",
+        "name": "3: Подъезд к Колпино II",
+        "duration": 25,
+        "green": [
+          "S",
+          "Wr",
+          "PE"
+        ]
+      },
+      {
+        "id": "3",
+        "name": "4: Оборонная — запад",
+        "duration": 15,
+        "green": [
+          "W",
+          "Wl",
+          "PS",
+          "Nr"
+        ]
+      },
+      {
+        "id": "ph21090",
+        "name": "6: Оборонная — восток",
+        "duration": 15,
+        "green": [
+          "El",
+          "E",
+          "PN"
+        ]
+      }
+    ],
+    "timing": {
+      "yellow": 3,
+      "redYellow": 2,
+      "flashGreen": 3,
+      "allRed": 3,
+      "pedClearance": 3
+    },
+    "offset": 0,
+    "controller": "fixed",
+    "code": "// Контроллер светофорного объекта, работает в режиме «код».\n// Вызывается в конце каждой фазы. Фазы программы:\n//   0: «1: Подъезд к Колпино I» — 25 с\n//   1: «1,5: Тверская ОТ» — 3 с\n//   2: «2: Тверская» — 20 с\n//   3: «3: Подъезд к Колпино II» — 25 с\n//   4: «4: Оборонная — запад» — 15 с\n//   5: «6: Оборонная — восток» — 15 с\nimport type { ControllerContext } from 'sim';\n\n/** Какая фаза идёт следующей (по умолчанию — по кругу) */\nexport function nextPhase(ctx: ControllerContext): number {\n  return (ctx.phaseIndex + 1) % ctx.phaseCount;\n}\n\n/** Длительность основного такта фазы, целые секунды. Пример адаптивности — ниже. */\nexport function phaseDuration(ctx: ControllerContext, phaseIndex: number): number {\n  const base = ctx.durations[phaseIndex];\n  // Пример: продлить первую фазу, если очередь на подходе S длиннее 10 машин\n  // if (phaseIndex === 0 && (ctx.queues.S ?? 0) > 10) return base + 10;\n  // Пример: пропустить пешеходную фазу, если никто не ждёт\n  // if (ctx.pedsWaiting === 0 && phaseIndex === ctx.phaseCount - 1) return 1;\n  return base;\n}\n"
+  },
+  "transit": {
+    "enabled": true,
+    "stops": [
+      {
+        "id": "TV-in",
+        "name": "Тверская улица перед перекрёстком",
+        "arm": "N",
+        "side": "approach",
+        "dist": 18,
+        "bay": false
+      },
+      {
+        "id": "TV-out",
+        "name": "Тверская улица за перекрёстком",
+        "arm": "N",
+        "side": "exit",
+        "dist": 65,
+        "bay": true
+      },
+      {
+        "id": "OB-W",
+        "name": "Оборонная улица к западу от перекрёстка",
+        "arm": "W",
+        "side": "exit",
+        "dist": 20,
+        "bay": false
+      },
+      {
+        "id": "ST1",
+        "name": "Оборонная ул. на восток",
+        "arm": "E",
+        "side": "exit",
+        "dist": 25,
+        "bay": false
+      }
+    ],
+    "routes": [
+      {
+        "id": "324n",
+        "name": "324 к Тверской",
+        "from": "S",
+        "to": "N",
+        "stops": [
+          "TV-out"
+        ],
+        "perHour": 3.3,
+        "length": 12,
+        "headway": "14–22 мин",
+        "enabled": true
+      },
+      {
+        "id": "324s",
+        "name": "324 к пос. Тельмана",
+        "from": "N",
+        "to": "S",
+        "stops": [
+          "TV-in"
+        ],
+        "perHour": 3.3,
+        "length": 12,
+        "headway": "14–22 мин",
+        "enabled": true
+      },
+      {
+        "id": "325w",
+        "name": "325 к Заводскому проспекту",
+        "from": "N",
+        "to": "W",
+        "stops": [
+          "OB-W"
+        ],
+        "perHour": 2.2,
+        "length": 12,
+        "headway": "25–30 мин",
+        "enabled": true
+      },
+      {
+        "id": "325n",
+        "name": "325 к Тверской",
+        "from": "W",
+        "to": "N",
+        "stops": [
+          "TV-out"
+        ],
+        "perHour": 2.2,
+        "length": 12,
+        "headway": "25–30 мин",
+        "enabled": true
+      },
+      {
+        "id": "328e",
+        "name": "328 к Московской улице",
+        "from": "N",
+        "to": "E",
+        "stops": [
+          "ST1"
+        ],
+        "perHour": 3.3,
+        "length": 12,
+        "headway": "13–23 мин",
+        "enabled": true
+      },
+      {
+        "id": "328w",
+        "name": "328 к улице Анисимова",
+        "from": "E",
+        "to": "W",
+        "stops": [
+          "OB-W"
+        ],
+        "perHour": 3.3,
+        "length": 12,
+        "headway": "13–23 мин",
+        "enabled": true
+      },
+      {
+        "id": "330w",
+        "name": "330 к улице Анисимова",
+        "from": "N",
+        "to": "W",
+        "stops": [
+          "OB-W"
+        ],
+        "perHour": 6.7,
+        "length": 12,
+        "headway": "6–12 мин",
+        "enabled": true
+      },
+      {
+        "id": "330n",
+        "name": "330 к Тверской",
+        "from": "W",
+        "to": "N",
+        "stops": [
+          "TV-out"
+        ],
+        "perHour": 6.7,
+        "length": 12,
+        "headway": "6–12 мин",
+        "enabled": true
+      },
+      {
+        "id": "364n",
+        "name": "364 к Тверской",
+        "from": "W",
+        "to": "N",
+        "stops": [
+          "TV-out"
+        ],
+        "perHour": 2.9,
+        "length": 12,
+        "headway": "около 20 мин",
+        "enabled": true
+      },
+      {
+        "id": "364w",
+        "name": "364 к улице Анисимова",
+        "from": "N",
+        "to": "W",
+        "stops": [
+          "OB-W"
+        ],
+        "perHour": 2.9,
+        "length": 12,
+        "headway": "около 20 мин",
+        "enabled": true
+      },
+      {
+        "id": "367s",
+        "name": "367 к пос. Тельмана",
+        "from": "N",
+        "to": "S",
+        "stops": [
+          "TV-in"
+        ],
+        "perHour": 3.3,
+        "length": 12,
+        "headway": "14–22 мин",
+        "enabled": true
+      },
+      {
+        "id": "367n",
+        "name": "367 к Тверской",
+        "from": "S",
+        "to": "N",
+        "stops": [
+          "TV-out"
+        ],
+        "perHour": 3.3,
+        "length": 12,
+        "headway": "14–22 мин",
+        "enabled": true
+      },
+      {
+        "id": "392n",
+        "name": "392 к Тверской",
+        "from": "S",
+        "to": "N",
+        "stops": [
+          "TV-out"
+        ],
+        "perHour": 2.7,
+        "length": 12,
+        "headway": "22 мин",
+        "enabled": true
+      },
+      {
+        "id": "392s",
+        "name": "392 к пос. Тельмана",
+        "from": "N",
+        "to": "S",
+        "stops": [
+          "TV-in"
+        ],
+        "perHour": 2.7,
+        "length": 12,
+        "headway": "22 мин",
+        "enabled": true
+      }
+    ],
+    "dwellMin": 10,
+    "dwellMax": 25
+  },
+  "spawners": {
+    "E": {
+      "id": "spawn-E",
+      "params": {
+        "arrival": "platoon",
+        "rate": 350,
+        "profile": [],
+        "platoonSize": 7,
+        "destinations": {
+          "W": 0.5,
+          "S": 0.4,
+          "N": 0.1
+        },
+        "types": [
+          {
+            "kind": "car",
+            "share": 0.87,
+            "lengthMin": 4.2,
+            "lengthMax": 4.9
+          },
+          {
+            "kind": "van",
+            "share": 0.08,
+            "lengthMin": 5.4,
+            "lengthMax": 6.6
+          },
+          {
+            "kind": "truck",
+            "share": 0.04,
+            "lengthMin": 9,
+            "lengthMax": 12
+          },
+          {
+            "kind": "bus",
+            "share": 0.01,
+            "lengthMin": 11.5,
+            "lengthMax": 12.5
+          }
+        ]
+      },
+      "code": "",
+      "manual": false
+    },
+    "N": {
+      "id": "spawn-N",
+      "params": {
+        "arrival": "poisson",
+        "rate": 350,
+        "profile": [],
+        "platoonSize": 4,
+        "destinations": {
+          "S": 0.6,
+          "W": 0.2
+        },
+        "types": [
+          {
+            "kind": "car",
+            "share": 0.87,
+            "lengthMin": 4.2,
+            "lengthMax": 4.9
+          },
+          {
+            "kind": "van",
+            "share": 0.08,
+            "lengthMin": 5.4,
+            "lengthMax": 6.6
+          },
+          {
+            "kind": "truck",
+            "share": 0.04,
+            "lengthMin": 9,
+            "lengthMax": 12
+          },
+          {
+            "kind": "bus",
+            "share": 0.01,
+            "lengthMin": 11.5,
+            "lengthMax": 12.5
+          }
+        ]
+      },
+      "code": "",
+      "manual": false
+    },
+    "W": {
+      "id": "spawn-W",
+      "params": {
+        "arrival": "poisson",
+        "rate": 420,
+        "profile": [],
+        "platoonSize": 4,
+        "destinations": {
+          "E": 0.45,
+          "N": 0.18,
+          "S": 0.65
+        },
+        "types": [
+          {
+            "kind": "car",
+            "share": 0.87,
+            "lengthMin": 4.2,
+            "lengthMax": 4.9
+          },
+          {
+            "kind": "van",
+            "share": 0.08,
+            "lengthMin": 5.4,
+            "lengthMax": 6.6
+          },
+          {
+            "kind": "truck",
+            "share": 0.04,
+            "lengthMin": 9,
+            "lengthMax": 12
+          },
+          {
+            "kind": "bus",
+            "share": 0.01,
+            "lengthMin": 11.5,
+            "lengthMax": 12.5
+          }
+        ]
+      },
+      "code": "",
+      "manual": false
+    },
+    "S": {
+      "id": "spawn-S",
+      "params": {
+        "arrival": "platoon",
+        "rate": 500,
+        "profile": [],
+        "platoonSize": 4,
+        "destinations": {
+          "N": 0.4,
+          "W": 0.55,
+          "E": 0.15
+        },
+        "types": [
+          {
+            "kind": "car",
+            "share": 0.87,
+            "lengthMin": 4.2,
+            "lengthMax": 4.9
+          },
+          {
+            "kind": "van",
+            "share": 0.08,
+            "lengthMin": 5.4,
+            "lengthMax": 6.6
+          },
+          {
+            "kind": "truck",
+            "share": 0.04,
+            "lengthMin": 9,
+            "lengthMax": 12
+          },
+          {
+            "kind": "bus",
+            "share": 0.01,
+            "lengthMin": 11.5,
+            "lengthMax": 12.5
+          }
+        ]
+      },
+      "code": "",
+      "manual": false
+    }
+  },
+  "laneChoosers": {
+    "E": {
+      "id": "lanes-E",
+      "params": {
+        "strategy": "weights",
+        "preLaned": 0.7,
+        "weights": {
+          "W": [
+            0.3,
+            0.7,
+            0
+          ],
+          "S": [
+            1,
+            0,
+            0
+          ],
+          "N": [
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "code": "",
+      "manual": false
+    },
+    "N": {
+      "id": "lanes-N",
+      "params": {
+        "strategy": "weights",
+        "preLaned": 1,
+        "weights": {
+          "S": [
+            1,
+            0
+          ],
+          "W": [
+            0,
+            1
+          ]
+        }
+      },
+      "code": "",
+      "manual": false
+    },
+    "W": {
+      "id": "lanes-W",
+      "params": {
+        "strategy": "weights",
+        "preLaned": 0.7,
+        "weights": {
+          "E": [
+            0.3,
+            0.7,
+            0
+          ],
+          "N": [
+            1,
+            0,
+            0
+          ],
+          "S": [
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "code": "",
+      "manual": false
+    },
+    "S": {
+      "id": "lanes-S",
+      "params": {
+        "strategy": "weights",
+        "preLaned": 1,
+        "weights": {
+          "N": [
+            1
+          ],
+          "W": [
+            1
+          ],
+          "E": [
+            1
+          ]
+        }
+      },
+      "code": "",
+      "manual": false
+    }
+  },
+  "exits": {
+    "E": {
+      "id": "exit-E",
+      "params": {
+        "capacityPerLane": 0,
+        "blocked": []
+      },
+      "code": "",
+      "manual": false
+    },
+    "N": {
+      "id": "exit-N",
+      "params": {
+        "capacityPerLane": 0,
+        "blocked": []
+      },
+      "code": "",
+      "manual": false
+    },
+    "W": {
+      "id": "exit-W",
+      "params": {
+        "capacityPerLane": 0,
+        "blocked": []
+      },
+      "code": "",
+      "manual": false
+    },
+    "S": {
+      "id": "exit-S",
+      "params": {
+        "capacityPerLane": 800,
+        "blocked": []
+      },
+      "code": "",
+      "manual": false
+    }
+  },
+  "sim": {
+    "dt": 0.1,
+    "seed": 78,
+    "riskyShare": 0.15,
+    "obstructedVisibility": 20,
+    "normalVisibility": 150,
+    "criticalGapLeft": 5,
+    "criticalGapOther": 4,
+    "petDanger": 1.5,
+    "petWindow": 5,
+    "ttcDanger": 0.5,
+    "crashPersist": false,
+    "crashDuration": 1200,
+    "missedTurn": "wait",
+    "lcPatience": 6,
+    "pathSpread": true,
+    "implicitShift": 1,
+    "implicitBend": 1,
+    "trajectoryChoice": "free",
+    "drivers": {
+      "accelMin": 2.4,
+      "accelMax": 3,
+      "heavyAccel": 1.35,
+      "speedMin": 0.9,
+      "speedMax": 1.1,
+      "headwayMin": 0.6,
+      "headwayMax": 1.2,
+      "gap": 1.5,
+      "riskyFactor": 0.7,
+      "reactionMin": 0.7,
+      "reactionMax": 1
+    },
+    "violations": {
+      "solidLine": 0.2,
+      "stopLine": 0.75,
+      "redLight": 0,
+      "illegalTurn": 0.1
+    },
+    "deadlockSeconds": 10,
+    "deadlockBreak": 15,
+    "diagnosticRecovery": false,
+    "mode": "strict",
+    "slowdownWindow": 120,
+    "slowdownRatio": 0.5,
+    "noProgressSeconds": 90,
+    "historySeconds": 300
+  },
+  "basemap": {
+    "builtin": "kolpino",
+    "origin": {
+      "lat": 59.7308223,
+      "lon": 30.6119932
+    },
+    "rotation": -1.52,
+    "dx": 0,
+    "dy": 0,
+    "features": [],
+    "attribution": "© участники OpenStreetMap, лицензия ODbL"
+  }
+}

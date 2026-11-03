@@ -241,6 +241,7 @@ function normalizeSim(raw: unknown): ModelConfig['sim'] {
   }
   sim.seed = Math.round(sim.seed);
   sim.diagnosticRecovery = r.diagnosticRecovery === true;
+  sim.mode = r.mode === 'visual' ? 'visual' : 'strict';
   sim.crashPersist = typeof r.crashPersist === 'boolean' ? r.crashPersist : SIM_DEFAULT.crashPersist;
   sim.missedTurn = r.missedTurn === 'wait' ? 'wait' : 'reroute';
   sim.pathSpread = typeof r.pathSpread === 'boolean' ? r.pathSpread : SIM_DEFAULT.pathSpread;

@@ -1,6 +1,7 @@
 import '../polyfills';
 import { runExperiment, type ExperimentSpec } from './experiment';
 import { initSandbox } from './sandbox';
+export function installExperimentWorker() {
 self.onmessage = async (e: MessageEvent<{ spec: ExperimentSpec; wasm?: ArrayBuffer }>) => {
   try {
     if (e.data.wasm) await initSandbox(e.data.wasm);
@@ -8,3 +9,5 @@ self.onmessage = async (e: MessageEvent<{ spec: ExperimentSpec; wasm?: ArrayBuff
     self.postMessage({ result });
   } catch (error) { self.postMessage({ error: error instanceof Error ? error.message : String(error) }); }
 };
+
+}

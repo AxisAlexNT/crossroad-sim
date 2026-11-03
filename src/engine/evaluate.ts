@@ -42,6 +42,7 @@ export function evaluate(req: EvalRequest): Summary {
   const runs: Summary[] = [];
   for (let k = 0; k < Math.max(1, req.seeds); k++) {
     const cfg: ModelConfig = structuredClone(req.cfg);
+    cfg.sim.mode = 'strict';
     cfg.signals.phases.forEach((p, i) => { p.duration = Math.max(1, Math.round(req.durations[i] ?? p.duration)); });
     // одни и те же зёрна для всех вариантов: потоки машин и пешеходов у них общие, сравниваются только программы
     cfg.sim.seed = (req.seedBase ?? req.cfg.sim.seed) + k * 7919;

@@ -44,7 +44,7 @@ export function chartsFor(cfg: Pick<ModelConfig, 'arms'>): ChartDef[] {
       id: 'safety', title: 'Опасные ситуации между машинами с начала прогона', yLabel: 'шт',
       series: (s) => [
         { label: 'опасные моменты', color: '#f2a33a', values: s.dangers },
-        { label: 'пересечения траекторий с PET меньше окна', color: '#9aa3b2', values: s.crossings },
+        { label: 'пересечения траекторий с интервалом меньше заданного', color: '#9aa3b2', values: s.crossings },
         { label: 'столкновения в модели', color: '#e5484d', values: s.collisions },
       ],
     },

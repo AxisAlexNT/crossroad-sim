@@ -1,5 +1,6 @@
 // Состояние приложения и управление симуляцией (пересборка модели, воспроизведение, перемотка).
 
+import { migrationLabels } from './migrationText';
 import { markRaw, reactive, shallowRef, watch } from 'vue';
 import type { ArmId, ModelConfig } from '../engine/types';
 import { DEFAULT_PRESET, defaultModel, kolpinoModel, applyMarkings, markingsFor, PRESETS } from '../engine/presets';
@@ -39,35 +40,50 @@ const OLD_STORAGE_KEY = 'crossroad-sim-session-v1';
 
 let storageProtected = false;
 let storageIssue = '';
+let storageWarnings: string[] = [];
+let pendingOriginal: string | null = null;
 function loadSaved(): { cfg: ModelConfig | null; presetId?: string } & Preferences {
   for (const key of [STORAGE_KEY, OLD_STORAGE_KEY, STORAGE_KEY + '-last-good']) {
     try {
       const raw = localStorage.getItem(key);
       if (!raw) continue;
+      pendingOriginal = raw;
       const loaded = migrateSession(JSON.parse(raw));
       // Сохраняем исходную запись до любых автоматических преобразований.
-      if (!localStorage.getItem(STORAGE_KEY + '-original')) localStorage.setItem(STORAGE_KEY + '-original', raw);
+      try {
+        if (loaded.report.warnings.length || !localStorage.getItem(STORAGE_KEY + '-original')) localStorage.setItem(STORAGE_KEY + '-original', raw);
+      } catch {
+        storageProtected = true;
+        storageIssue = 'Не удалось сохранить резервную копию в браузере. Модель открыта; скачайте исходный файл перед продолжением.';
+      }
       if (loaded.report.warnings.length) {
         storageProtected = true;
-        storageIssue = 'Сохранение восстановлено с преобразованиями. Исходная запись сохранена; автоматическая перезапись отключена. ' + loaded.report.warnings.join(' ');
+        storageWarnings = migrationLabels(loaded.report.warnings);
+        if (!storageIssue) storageIssue = 'Некоторые настройки сохранения обновлены.';
       }
       return { cfg: loaded.cfg, presetId: loaded.presetId, ...loaded.preferences };
     } catch {
       storageProtected = true;
-      storageIssue = 'Не удалось полностью восстановить сохранение. Исходная запись не перезаписана. Можно импортировать JSON-сессию.';
+      storageIssue = 'Не удалось полностью восстановить сохранение. Исходная запись не перезаписана. Можно открыть файл сессии.';
     }
   }
   return { cfg: null };
 }
 
 const saved = loadSaved();
+const initialConfig = saved.cfg ?? defaultModel(DEFAULT_PRESET);
+if (!saved.cfg) initialConfig.sim.mode = 'visual';
 
 export const app = reactive({
   tab: 'sim' as TabId,
+  detailedSettings: false,
   storageIssue,
+  storageWarnings,
+  migrationOpen: storageProtected,
+  autosavePaused: storageProtected,
   showTimers: saved.showTimers ?? false,
   theme: (saved.theme ?? 'dark') as 'dark' | 'light',
-  cfg: (saved.cfg ?? defaultModel(DEFAULT_PRESET)) as ModelConfig,
+  cfg: initialConfig as ModelConfig,
   presetId: saved.presetId ?? DEFAULT_PRESET,
   /** Нарушения положений проектов стандартов считать ошибками */
   draftAsError: saved.draftAsError ?? false,
@@ -133,6 +149,7 @@ export const app = reactive({
   highlightVid: -1,
   toast: '' as string,
   interactiveError: '',
+  interactiveErrorDetails: '',
 });
 
 export const simRef = shallowRef<Simulation | null>(null);
@@ -160,7 +177,8 @@ export function runInteractive(command: InteractiveCommand, details = false): Pr
   }).catch(error => {
     if (epoch === interactiveEpoch) {
       app.playing = false;
-      app.interactiveError = error instanceof Error ? error.message : String(error);
+      app.interactiveErrorDetails = error instanceof Error ? error.message : String(error);
+      app.interactiveError = 'Не удалось продолжить расчёт. Перезапустите модель. Если ошибка повторится, сохраните сессию для проверки.';
     }
     throw error;
   });
@@ -171,6 +189,7 @@ export function runInteractive(command: InteractiveCommand, details = false): Pr
 function startInteractive(cfg: ModelConfig, target: number) {
   const epoch = ++interactiveEpoch;
   app.interactiveError = '';
+  app.interactiveErrorDetails = '';
   interactiveClient?.dispose();
   interactiveClient = null;
   interactiveChain = (async () => {
@@ -196,8 +215,9 @@ function startInteractive(cfg: ModelConfig, target: number) {
   })().catch(error => {
     if (epoch !== interactiveEpoch) return;
     app.playing = false;
-    app.interactiveError = error instanceof Error ? error.message : String(error);
-    toast('Ошибка фоновой модели: ' + (error instanceof Error ? error.message : String(error)));
+    app.interactiveErrorDetails = error instanceof Error ? error.message : String(error);
+      app.interactiveError = 'Не удалось продолжить расчёт. Перезапустите модель. Если ошибка повторится, сохраните сессию для проверки.';
+    toast('Фоновый расчёт остановлен. Подробности доступны в сообщении над моделью.');
   });
 }
 
@@ -229,7 +249,7 @@ export function rebuild(keepTime = false) {
   try {
     sim = markRaw(new Simulation(JSON.parse(JSON.stringify(app.cfg)) as ModelConfig, code));
   } catch (e) {
-    toast('Модель не собирается: ' + (e instanceof Error ? e.message : String(e)));
+    toast('Не удалось подготовить модель. Проверьте настройки и код узлов в редакторе.');
     return;
   }
   for (const e of errors) sim.addLog('error', 'compile', e);
@@ -329,35 +349,63 @@ export function saveSession() {
     if (previous) { migrateSession(JSON.parse(previous)); localStorage.setItem(STORAGE_KEY + '-last-good', previous); }
     localStorage.setItem(STORAGE_KEY, text);
     app.storageIssue = '';
+    app.autosavePaused = false;
   } catch {
-    app.storageIssue = 'Не удалось сохранить настройки в браузере. Скачайте JSON-сессию для сохранения изменений.';
+    app.autosavePaused = true;
+    app.storageIssue = 'Не удалось сохранить настройки в браузере. Скачайте файл сессии для сохранения изменений.';
   }
 }
 
 export function exportSavedOriginal() {
   try {
-    const text = localStorage.getItem(STORAGE_KEY + '-original') ?? localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(OLD_STORAGE_KEY);
+    const text = (app.autosavePaused ? pendingOriginal : null) ?? localStorage.getItem(STORAGE_KEY + '-original') ?? localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(OLD_STORAGE_KEY);
     if (text) download('session-original.json', text, 'application/json');
     else toast('Исходное сохранение недоступно');
   } catch { toast('Хранилище браузера недоступно'); }
 }
 
-export async function resumeSaving() {
-  const answer = await ask('Сохранение восстановленной модели', 'Текущая модель станет основным сохранением. Перед этим можно скачать исходную запись.', [],
-    [{ id: 'save', label: 'Сохранить текущую', kind: 'primary' }, { id: 'cancel', label: 'Отмена' }]);
-  if (answer !== 'save') return;
+export function resumeSaving() {
   try {
-    const current = localStorage.getItem(STORAGE_KEY);
-    if (current) localStorage.setItem(STORAGE_KEY + '-before-recovery', current);
+    const current = pendingOriginal ?? localStorage.getItem(STORAGE_KEY);
+    if (current && current !== localStorage.getItem(STORAGE_KEY + '-original')) localStorage.setItem(STORAGE_KEY + '-original', current);
     localStorage.setItem(STORAGE_KEY, exportSession());
+    pendingOriginal = null;
     storageProtected = false;
+    app.autosavePaused = false;
+    app.migrationOpen = false;
     app.storageIssue = '';
-  } catch { app.storageIssue = 'Хранилище недоступно. Скачайте JSON-сессию.'; }
+    toast('Изменения приняты. Автосохранение включено');
+  } catch {
+    storageProtected = true; app.autosavePaused = true; app.migrationOpen = true;
+    app.storageIssue = 'Не удалось включить автосохранение. Исходная запись не перезаписана; скачайте исходный файл и повторите попытку.';
+  }
+}
+
+export function useDefaultSavedModel() {
+  app.cfg = defaultModel(DEFAULT_PRESET);
+  app.cfg.sim.mode = 'visual';
+  app.presetId = DEFAULT_PRESET;
+  app.selected = null;
+  resumeSaving();
+}
+
+export async function restoreSavedOriginal() {
+  try {
+    const original = localStorage.getItem(STORAGE_KEY + '-original');
+    if (!original) { toast('Исходное сохранение недоступно'); return; }
+    await importSession(original);
+  } catch { toast('Исходное сохранение не удалось открыть. Его можно скачать и сохранить отдельно.'); }
 }
 
 export function applyPreset(id: string) {
   const p = PRESETS.find((x) => x.id === id);
   if (!p) return;
+  if (id === 'worked') {
+    const mode = app.cfg.sim.mode;
+    app.cfg = kolpinoModel(id); app.cfg.sim.mode = mode;
+    app.presetId = id; app.selected = null;
+    toast('Модель загружена; режим расчёта сохранён'); return;
+  }
   if (!presetsApplicable()) { toast('Предустановки рассчитаны на модель Оборонная / Тверская'); return; }
   app.presetId = id;
   app.cfg.signals = p.signals();
@@ -374,7 +422,8 @@ export function loadPresetPart(id: string, part: 'all' | 'signals' | 'markings',
   if (!p) return null;
   if (part === 'all') {
     const m = kolpinoModel(id);
-    m.sim = JSON.parse(JSON.stringify(cfg.sim));
+    if (id !== 'worked') m.sim = JSON.parse(JSON.stringify(cfg.sim));
+    else m.sim.mode = cfg.sim.mode;
     return m;
   }
   if (part === 'signals') {
@@ -393,7 +442,9 @@ export function resetGraph(cfg: ModelConfig = app.cfg) {
 }
 
 export function resetModel() {
+  const mode = app.cfg.sim.mode;
   app.cfg = defaultModel(app.presetId);
+  app.cfg.sim.mode = mode;
   app.selected = null;
   toast('Модель сброшена к исходной');
 }
@@ -442,18 +493,27 @@ export async function importSession(text: string): Promise<boolean> {
   const data = JSON.parse(text) as unknown;
   const loaded = migrateSession(data);
   if (loaded.report.warnings.length) {
-    const choice = await ask('Преобразование сессии', 'Часть данных изменится. Сохраните исходный файл для восстановления.', loaded.report.warnings,
-      [{ id: 'load', label: 'Загрузить', kind: 'primary' }, { id: 'cancel', label: 'Отмена' }]);
+    let choice: string;
+    do {
+      choice = await ask('Сохранение обновлено', 'Модель можно открыть. Несколько настроек пришлось изменить для этой версии программы.', migrationLabels(loaded.report.warnings),
+        [{ id: 'load', label: 'Продолжить', kind: 'primary' }, { id: 'download', label: 'Скачать исходный файл' }, { id: 'default', label: 'Открыть модель по умолчанию' }]);
+      if (choice === 'download') download('исходная-сессия.json', text, 'application/json');
+    } while (choice === 'download');
+    if (choice === 'default') { useDefaultSavedModel(); return false; }
     if (choice !== 'load') return false;
   }
   const cfg = await vetCustomCode(loaded.cfg);
   if (!cfg) return false;
   const compiled = compileModel(cfg);
   if (compiled.errors.length) throw new Error(compiled.errors.join('\n'));
+  pendingOriginal = text;
+  storageProtected = true; app.autosavePaused = true;
+  app.storageWarnings = migrationLabels(loaded.report.warnings);
   app.cfg = cfg;
   app.presetId = loaded.presetId && PRESETS.some((p) => p.id === loaded.presetId) ? loaded.presetId : 'custom';
   Object.assign(app, loaded.preferences);
   app.selected = null;
+  resumeSaving();
   return true;
 }
 

@@ -30,6 +30,8 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Полная регрессия
+        env:
+          PRIVACY_TERMS: ${{ secrets.PRIVACY_TERMS }}
         run: npm test
       - name: Сборка
         run: npm run build

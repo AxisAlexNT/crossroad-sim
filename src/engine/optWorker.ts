@@ -5,6 +5,7 @@ import { evaluateCandidate, type EvalRequest, type EvalResponse } from './evalua
 import { initSandbox } from './sandbox';
 
 type Msg = EvalRequest | { type: 'sandbox'; wasm: ArrayBuffer };
+export function installOptimizationWorker() {
 const ctx = self as unknown as { onmessage: ((e: MessageEvent<Msg>) => void) | null; postMessage: (m: EvalResponse) => void };
 let ready: Promise<unknown> = Promise.resolve();
 ctx.onmessage = (e: MessageEvent<Msg>) => {
@@ -19,3 +20,5 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
     }
   }).catch(err => ctx.postMessage({ id: m.id, error: err instanceof Error ? err.message : String(err) }));
 };
+
+}

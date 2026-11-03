@@ -31,9 +31,15 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Полная регрессия перед публикацией
+        env:
+          PRIVACY_TERMS: ${{ secrets.PRIVACY_TERMS }}
         run: npm test
       - run: npm run build
       - run: npm run check:dist
+      - name: Проверка состава сборки
+        env:
+          PRIVACY_TERMS: ${{ secrets.PRIVACY_TERMS }}
+        run: npm run test:privacy
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

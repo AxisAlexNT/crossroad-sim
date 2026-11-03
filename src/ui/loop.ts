@@ -80,7 +80,7 @@ function frame(now: number) {
           if (!seconds && complete) stepAcc = Math.max(0, Math.min(3, stepAcc - 1));
           forceRender = true;
         })
-        .catch(error => { if (version === app.version) { app.playing = false; toast(String(error)); } })
+        .catch(error => { if (version === app.version) { app.playing = false; toast('Расчёт остановлен. Перезапустите модель или проверьте сообщение об ошибке.'); } })
         .finally(() => { frameRequest = false; });
     }
     app.stats.lag = target - sim.st.t > Math.max(1, app.speed * .2);
@@ -144,7 +144,7 @@ function enqueueControl(makeCommand: () => Command) {
     if (version !== app.version) return;
     await runInteractive({ type: 'snapshot' });
     if (version === app.version) await control(makeCommand());
-  }).catch(error => { toast(String(error)); }).finally(() => { pendingControls--; });
+  }).catch(error => { toast('Расчёт остановлен. Перезапустите модель или проверьте сообщение об ошибке.'); }).finally(() => { pendingControls--; });
 }
 
 async function control(command: Command) {
@@ -160,7 +160,7 @@ async function control(command: Command) {
     refreshStats();
     for (const h of slowHooks) h();
     app.logTick++;
-  } catch (error) { toast(String(error)); }
+  } catch (error) { toast('Расчёт остановлен. Перезапустите модель или проверьте сообщение об ошибке.'); }
 }
 
 export function stepSeconds(sec: number) {

@@ -6,6 +6,7 @@ import type {
   ArmConfig, ArmId, Basemap, LaneChooserParams, ModelConfig, PedConfig, Phase, SignalGroup, SignalProgram, SpawnerParams, TransitConfig,
 } from './types';
 import { genControllerCode } from './codegen';
+import workedModel from './data/worked-model.json';
 import {
   PED_COLOR, PED_GROUPS_DEFAULT, SIM_DEFAULT, TIMING_DEFAULT, VEHICLE_TYPES, conn, makeChooser, makeExit, makeSpawner,
   modelFromArms, newArm, reconcile,
@@ -117,6 +118,12 @@ export interface Preset {
 
 /** Варианты светофорных программ для перекрёстка Оборонная / Тверская. Длительности фаз условные. */
 export const PRESETS: Preset[] = [
+  {
+    id: 'worked',
+    name: 'Проработанная модель',
+    description: 'Дополнительные секции светофоров, отдельные направления для автобусов и настроенные потоки движения.',
+    signals: () => structuredClone(workedModel.signals) as SignalProgram,
+  },
   {
     id: 'v1',
     name: 'Вариант 1. Четыре фазы без допсекций',
@@ -254,8 +261,9 @@ export const DEFAULT_PRESET = 'v1';
 
 /** Модель перекрёстка Оборонная / Тверская */
 export function kolpinoModel(presetId = DEFAULT_PRESET): ModelConfig {
+  if (presetId === 'worked') return reconcile(structuredClone(workedModel) as unknown as ModelConfig);
   const arms = structuredClone(KOLPINO_ARMS);
-  const preset = PRESETS.find((p) => p.id === presetId) ?? PRESETS[0];
+  const preset = PRESETS.find((p) => p.id === presetId) ?? PRESETS.find(p => p.id === DEFAULT_PRESET)!;
   const spawners: ModelConfig['spawners'] = {};
   const laneChoosers: ModelConfig['laneChoosers'] = {};
   const exits: ModelConfig['exits'] = {};
@@ -313,6 +321,11 @@ export interface Template {
 
 /** Шаблоны для редактора схемы */
 export const TEMPLATES: Template[] = [
+  {
+    id: 'worked', name: 'Проработанная модель',
+    description: 'Полная схема с настроенными полосами, светофорами, автобусами и потоками.',
+    make: () => kolpinoModel('worked'),
+  },
   {
     id: 'kolpino',
     name: 'Оборонная / Тверская, Колпино',

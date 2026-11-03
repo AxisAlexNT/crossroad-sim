@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { humanFileError } from './migrationText';
 import { computed, onBeforeUnmount, reactive, ref } from 'vue';
-import { app, download, exportSession, fileBase, importSession, resetModel, simRef, toast } from './store';
+import { app, download, exportSession, fileBase, importSession, restoreSavedOriginal, exportSavedOriginal, resetModel, simRef, toast } from './store';
 import { exportPdf } from './pdf';
 import { DARK, LIGHT, sceneSvg } from './scene';
 import { BUILTIN_NAMES, KOLPINO_ORIGIN, basemapFeatures, parseGeoJson, parseOsmXml } from './basemap';
@@ -20,12 +21,12 @@ function loadJson(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0];
   (e.target as HTMLInputElement).value = '';
   if (!f) return;
-  try { checkFileSize(f.size); } catch (err) { toast('Не удалось загрузить: ' + (err as Error).message); return; }
+  try { checkFileSize(f.size); } catch (err) { toast(humanFileError(err)); return; }
   f.text().then((t) => {
     importSession(t)
       .then((ok) => { if (ok) toast('Сессия загружена'); })
-      .catch((err: unknown) => toast('Не удалось загрузить: ' + (err instanceof Error ? err.message : String(err))));
-  });
+      .catch((err: unknown) => toast(humanFileError(err)));
+  }).catch(() => toast('Не удалось прочитать файл. Попробуйте выбрать его ещё раз.'));
 }
 let pdfAbort: AbortController | null = null;
 onBeforeUnmount(() => pdfAbort?.abort());
@@ -36,7 +37,7 @@ async function makePdf() {
     await exportPdf({ source: pdf.source, unit: pdf.unit, amount: pdf.amount, signal: pdfAbort.signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') return;
-    toast('Ошибка экспорта в PDF: ' + (err instanceof Error ? err.message : String(err)));
+    toast('Не удалось подготовить документ. Попробуйте сократить длительность расчёта или сохранить текущий снимок.');
   } finally {
     pdf.busy = false;
     pdfAbort = null;
@@ -50,7 +51,7 @@ function loadOsm(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0];
   if (!f) return;
   if (f.size > OSM_MAX_BYTES) {
-    toast(`Файл слишком большой: ${(f.size / 1024 / 1024).toFixed(0)} МБ. Выделите на openstreetmap.org область поменьше, до ${OSM_MAX_BYTES / 1024 / 1024} МБ`);
+    toast(`Файл слишком большой: ${(f.size / 1024 / 1024).toFixed(0)} МБ. Выделите на OpenStreetMap область поменьше, до ${OSM_MAX_BYTES / 1024 / 1024} МБ`);
     (e.target as HTMLInputElement).value = '';
     return;
   }
@@ -64,7 +65,7 @@ function loadOsm(e: Event) {
       app.showBasemap = true;
       toast(`Подложка загружена, объектов: ${map.features.length}`);
     } catch (err) {
-      toast('Не удалось прочитать файл: ' + (err instanceof Error ? err.message : String(err)));
+      toast('Не удалось прочитать карту. Проверьте формат файла и попробуйте загрузить его ещё раз.');
     }
   });
   (e.target as HTMLInputElement).value = '';
@@ -97,14 +98,28 @@ function makeSvg() {
 
 <template>
   <div class="settings-tab">
+    <div class="row wrap gap"><span>Настройки:</span><button class="btn small" :aria-pressed="!app.detailedSettings" @click="app.detailedSettings = false">Просто</button><button class="btn small" :aria-pressed="app.detailedSettings" @click="app.detailedSettings = true">Подробно</button></div>
+    <section>
+      <h3>Режим расчёта</h3>
+      <label>Как моделировать движение
+        <select v-model="sim.mode">
+          <option value="visual">Наглядный — с помощью при остановках движения</option>
+          <option value="strict">Строгий — без вмешательств модели</option>
+        </select>
+      </label>
+      <p class="small muted">В наглядном режиме помощь при блокировке и освобождение места аварии отмечаются в журнале. Такие результаты не подходят для оценки программы светофоров. Подбор фаз и сравнение экспериментов всегда используют строгий режим.</p>
+    </section>
     <section>
       <h3>Сессия</h3>
       <div class="row wrap gap">
-        <button class="btn primary" @click="saveJson">Скачать JSON сессии</button>
-        <button class="btn" @click="fileInput?.click()">Загрузить JSON сессии</button>
+        <button class="btn primary" @click="saveJson">Скачать сессию</button>
+        <button class="btn" @click="fileInput?.click()">Открыть сессию</button>
         <input ref="fileInput" type="file" accept="application/json,.json" hidden @change="loadJson" />
+        <button class="btn" @click="restoreSavedOriginal">Восстановить сохранение до обновления</button>
+        <button class="btn" @click="exportSavedOriginal">Скачать исходное сохранение</button>
         <button class="btn danger" @click="resetModel">Сбросить модель</button>
       </div>
+      <p role="status">{{ app.autosavePaused ? 'Автосохранение приостановлено. Скачайте сессию для сохранения изменений.' : 'Автосохранение включено.' }}</p>
       <div class="small muted">В файл попадает вся модель: дороги, полосы, связи, пешеходный граф, светофоры, автобусы, код узлов, параметры симуляции. Сессия также сохраняется в этом браузере автоматически. Файл модели отдельно скачивается во вкладке «Редактор», раздел «Файл».</div>
     </section>
 
@@ -124,8 +139,8 @@ function makeSvg() {
       <div class="small muted">Схема перекрёстка, пиктограммы и описание фаз, ленточный график, графики метрик и проверки. На каждой странице есть пометка, что это результаты ограниченного моделирования.</div>
     </section>
 
-    <section>
-      <h3>Экспорт в SVG для Inkscape</h3>
+    <section v-if="app.detailedSettings">
+      <h3>Экспорт векторного рисунка</h3>
       <div class="grid3">
         <label>Оформление
           <select v-model="svgOpt.palette"><option value="light">Светлая</option><option value="dark">Тёмная</option></select>
@@ -148,10 +163,10 @@ function makeSvg() {
       <div class="small muted">Закрытая плашка снова появится после перезагрузки страницы.</div>
     </section>
 
-    <section>
+    <section v-if="app.detailedSettings">
       <h3>Подложка OpenStreetMap</h3>
       <div class="row wrap gap">
-        <button class="btn" @click="osmInput?.click()">Загрузить выгрузку .osm или GeoJSON</button>
+        <button class="btn" @click="osmInput?.click()">Загрузить файл карты</button>
         <input ref="osmInput" type="file" accept=".osm,.xml,.geojson,.json" hidden @change="loadOsm" />
         <label class="check"><input v-model="app.showBasemap" type="checkbox" :disabled="!bm" /> Показывать подложку</label>
         <button v-if="isKolpino && bm?.builtin !== 'kolpino'" class="btn small" @click="useBuiltin">Встроенная подложка Колпино</button>
@@ -172,13 +187,13 @@ function makeSvg() {
         </div>
       </template>
       <div class="small muted">
-        По умолчанию подложка выключена. Для другого места выгрузку можно получить на openstreetmap.org: кнопка «Экспорт», область — перекрёсток и соседние улицы.
+        По умолчанию подложка выключена. Для другого места выгрузку можно получить на OpenStreetMap: кнопка «Экспорт», область — перекрёсток и соседние улицы.
         Центр перекрёстка в модели совмещается с точкой {{ KOLPINO_ORIGIN.lat }}, {{ KOLPINO_ORIGIN.lon }}, если модель — Колпино, иначе с серединой выгрузки.
         Поворот и сдвиг помогают совместить подложку со схемой.
       </div>
     </section>
 
-    <section>
+    <section v-if="app.detailedSettings">
       <h3>Водители и безопасность</h3>
       <div class="grid3">
         <label>Доля рискованных водителей: {{ Math.round(sim.riskyShare * 100) }}%
@@ -188,7 +203,7 @@ function makeSvg() {
         <label>Обычная видимость, м <input v-model.number="sim.normalVisibility" type="number" min="20" max="400" step="10" /></label>
         <label>Критический интервал для левого поворота, с <input v-model.number="sim.criticalGapLeft" type="number" min="2" max="10" step="0.5" /></label>
         <label>Критический интервал для остальных, с <input v-model.number="sim.criticalGapOther" type="number" min="2" max="10" step="0.5" /></label>
-        <label>Порог «опасного момента» PET, с <input v-model.number="sim.petDanger" type="number" min="0.2" max="5" step="0.1" /></label>
+        <label>Наименьший безопасный промежуток между проездами, с <input v-model.number="sim.petDanger" type="number" min="0.2" max="5" step="0.1" /></label>
         <label>Окно «пересечений траекторий», с <input v-model.number="sim.petWindow" type="number" min="1" max="20" step="0.5" /></label>
         <label>Порог сближения по габаритам, с <input v-model.number="sim.ttcDanger" type="number" min="0" max="3" step="0.1" /></label>
         <label class="check"><input v-model="sim.crashPersist" type="checkbox" /> Столкнувшиеся машины остаются на месте и перекрывают проезд</label>
@@ -221,7 +236,7 @@ function makeSvg() {
       <div class="small muted">По ПДД водитель, не успевший занять нужную полосу до сплошной линии, едет в направлении, разрешённом из своей полосы, и меняет маршрут после перекрёстка.</div>
     </section>
 
-    <section>
+    <section v-if="app.detailedSettings">
       <h3>Нарушения ПДД рискованными водителями</h3>
       <div class="grid2">
         <label>Перестроение через сплошную: {{ Math.round(sim.violations.solidLine * 100) }}% <input v-model.number="sim.violations.solidLine" type="range" min="0" max="1" step="0.05" /></label>
@@ -232,7 +247,7 @@ function makeSvg() {
       <div class="small muted">Доля среди рискованных водителей. Остальные водители и рейсовые автобусы правила не нарушают.</div>
     </section>
 
-    <section>
+    <section v-if="app.detailedSettings">
       <h3>Проверки программы</h3>
       <label class="check"><input v-model="app.draftAsError" type="checkbox" /> Нарушения положений проектов стандартов считать ошибками</label>
       <div class="small muted">
@@ -241,7 +256,7 @@ function makeSvg() {
       </div>
     </section>
 
-    <section>
+    <section v-if="app.detailedSettings">
       <h3>Диагностика движения</h3>
       <div class="grid3">
         <label>Взаимная блокировка фиксируется через, с <input v-model.number="sim.deadlockSeconds" type="number" min="3" max="120" step="1" /></label>
@@ -254,7 +269,7 @@ function makeSvg() {
       <div class="small muted">Если время выхода из блокировки равно нулю, машины в модели стоят, пока блокировка не разрешится сама. Предупреждение о падении скорости появляется, когда средняя скорость в окне долго держится ниже порога.</div>
     </section>
 
-    <section>
+    <section v-if="app.detailedSettings">
       <div class="small muted">
         Рискованный водитель поворачивает налево, оценивая только то, что видит. Если обзор закрыт встречными левоповоротниками,
         невидимая машина может оказаться ближе, чем кажется. Осторожный водитель в такой ситуации ждёт конца фазы.
@@ -262,16 +277,16 @@ function makeSvg() {
       </div>
     </section>
 
-    <section>
+    <section v-if="app.detailedSettings">
       <h3>Симуляция</h3>
       <div class="grid3">
         <label>Шаг модели, с
           <select v-model.number="sim.dt"><option :value="0.05">0,05</option><option :value="0.1">0,1</option><option :value="0.2">0,2</option><option :value="0.25">0,25</option></select>
         </label>
-        <label>Зерно генератора случайных чисел <input v-model.number="sim.seed" type="number" step="1" /></label>
+        <label>Номер случайного прогона <input v-model.number="sim.seed" type="number" step="1" /></label>
         <label>История для перемотки назад, с <input v-model.number="sim.historySeconds" type="number" min="10" max="1800" step="10" /></label>
       </div>
-      <div class="small muted">Потоки пешеходов, их скорость и группы задаются в узлах пешеходного графа: на карте режим 🚶, затем нажмите на угол. Одинаковое зерно даёт одинаковый прогон.</div>
+      <div class="small muted">Потоки пешеходов, их скорость и группы задаются в узлах пешеходного графа: на карте режим 🚶, затем нажмите на угол. Одинаковый номер случайного прогона позволяет повторить те же условия.</div>
     </section>
   </div>
 </template>

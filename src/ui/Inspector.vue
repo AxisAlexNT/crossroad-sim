@@ -226,6 +226,29 @@ const veh = computed(() => {
   const id = sel.value.id;
   return simRef.value?.st.vehicles.find((v) => v.id === id) ?? null;
 });
+const yieldRecipient = computed(() => {
+  void app.statTick;
+  return simRef.value?.st.vehicles.find(v => v.id === veh.value?.yieldTo) ?? null;
+});
+function showYieldRecipient() {
+  const recipient = yieldRecipient.value;
+  if (!recipient) return;
+  app.highlightVid = recipient.id;
+  C.select({ kind: 'vehicle', id: recipient.id });
+}
+function movementReason(): string {
+  const v = veh.value;
+  if (!v) return '';
+  if (v.why !== 'yield') return WHY[v.why] ?? 'Причина движения уточняется';
+  if (v.yieldTo >= 0) {
+    if (v.v < .3) return `Ожидает проезда машины № ${v.yieldTo}`;
+    if (v.a < -.1) return `Снижает скорость, чтобы пропустить машину № ${v.yieldTo}`;
+    return `Движется с учётом машины № ${v.yieldTo}`;
+  }
+  if (v.yieldTo === -2) return v.v < .3 ? 'Ожидает смены сигнала конфликтующего направления' : 'Учитывает сигнал конфликтующего направления';
+  return v.v < .3 ? 'Ожидает освобождения конфликтной зоны' : 'Учитывает занятость конфликтной зоны';
+}
+
 const vehLog = computed(() => {
   void app.logTick;
   if (sel.value?.kind !== 'vehicle') return [];
@@ -475,12 +498,12 @@ function setWeight(dest: ArmId, lane: number, v: number) {
           <label>Название <input v-model="pedNode.label" /></label>
           <label>Тип <input :value="pedNode.kind === 'corner' ? 'угол между подходами' : pedNode.kind === 'island' ? 'островок безопасности' : 'произвольная точка'" disabled /></label>
           <template v-if="pedNode.kind === 'point'">
-            <label>x, м <input v-model.number="pedNode.x" type="number" step="0.5" /></label>
-            <label>y, м <input v-model.number="pedNode.y" type="number" step="0.5" /></label>
+            <label>По горизонтали, м <input v-model.number="pedNode.x" type="number" step="0.5" /></label>
+            <label>По вертикали, м <input v-model.number="pedNode.y" type="number" step="0.5" /></label>
           </template>
           <template v-else>
-            <label>Сдвиг x, м <input v-model.number="pedNode.dx" type="number" step="0.5" /></label>
-            <label>Сдвиг y, м <input v-model.number="pedNode.dy" type="number" step="0.5" /></label>
+            <label>Сдвиг по горизонтали, м <input v-model.number="pedNode.dx" type="number" step="0.5" /></label>
+            <label>Сдвиг по вертикали, м <input v-model.number="pedNode.dy" type="number" step="0.5" /></label>
           </template>
         </div>
         <div class="small muted">Переходы из узла: {{ pedNodeEdges.map((e) => nodeLabel(e.from === pedNode!.id ? e.to : e.from)).join(', ') || 'нет' }}.</div>
@@ -642,7 +665,11 @@ function setWeight(dest: ArmId, lane: number, v: number) {
         <div v-if="veh.origDest" class="kv"><span>Хотела на</span><b>{{ armName(veh.origDest) }}, не успела перестроиться</b></div>
         <div v-if="veh.route" class="kv"><span>Маршрут автобуса</span><b>{{ cfg.transit.routes.find((r) => r.id === veh!.route)?.name ?? veh.route }}</b></div>
         <div class="kv"><span>Движение</span><b>{{ veh.v < 0.1 ? 'остановился' : veh.a < -0.1 ? 'замедляется' : 'едет' }}</b></div>
-        <div class="kv"><span>Ограничение движения</span><b>{{ WHY[veh.why] }}</b></div>
+        <div class="kv"><span>Ограничение движения</span><b>{{ movementReason() }}</b></div>
+        <div v-if="veh.why === 'yield' && veh.yieldTo >= 0" class="row wrap gap">
+          <span>Связанный участник: машина № {{ veh.yieldTo }}</span>
+          <button class="btn small" :disabled="!yieldRecipient" @click="showYieldRecipient">Показать эту машину</button>
+        </div>
         <div class="small muted">{{ simRef?.explainVehicle(veh) }}</div>
         <div v-if="veh.error" class="alert">⚠ {{ veh.error }}</div>
       </div>
