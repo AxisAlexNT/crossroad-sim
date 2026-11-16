@@ -105,6 +105,10 @@ export interface Vehicle {
   yieldingAt: number;
   /** Кого ждёт при уступании: номер машины, -2 — окончания разрешающего сигнала встречным, -1 — не определено */
   yieldTo: number;
+  /** Пояснение уступки, не участвующее в решении о движении. */
+  yieldKind: '' | 'priority' | 'oncoming' | 'storage' | 'sight' | 'body' | 'clearing' | 'reserve';
+  /** Длительная остановка уже отмечена в текущем прогоне. */
+  holdLogged: boolean;
   /** До этого времени машина выбирается из неразрешимой блокировки и не проверяет пересечения с другими манёврами */
   ghostUntil: number;
   /** Участник наглядного разъезда ждёт освобождения пути выбранной машиной. */
@@ -210,6 +214,7 @@ export interface Counters {
   busDwellSum: number;
   deadlocks: number;
   stalls: number;
+  longHolds: number;
 }
 
 export interface DeadlockInfo {
@@ -460,6 +465,7 @@ export class Simulation {
   private blocker = -1;
   /** Фактическая зона уступки при вложенной проверке места дальше по пути. */
   private blockZone = -1;
+  private blockKind: Vehicle['yieldKind'] = '';
   private connLists: Vehicle[][] = [];
   private vehicleById = new Map<number, Vehicle>();
   private exitLists: Record<ArmId, Vehicle[][]> = {};
@@ -615,7 +621,7 @@ export class Simulation {
         spawned: 0, crossedStop: 0, exited: 0, sumWait: 0, waitArea: 0, delayArea: 0, waitAreaBy: {}, pedWaitArea: 0, crossedBy: {}, waitBy: {}, sumDelay: 0, errors: 0, collisions: 0, dangers: 0, crossings: 0,
         forcedLC: 0, gridlock: 0, codeErrors: 0, removedCrash: 0, dropped: 0, interventions: 0, removedRecovery: 0,
         pedSpawned: 0, pedDropped: 0, pedDone: 0, pedWaitSum: 0, pedDangers: 0, pedHits: 0, pedRouteErrors: 0,
-        missedTurns: 0, violSolid: 0, violStop: 0, violRed: 0, violTurn: 0, busSpawned: 0, busServed: 0, busDwellSum: 0, deadlocks: 0, stalls: 0,
+        missedTurns: 0, violSolid: 0, violStop: 0, violRed: 0, violTurn: 0, busSpawned: 0, busServed: 0, busDwellSum: 0, deadlocks: 0, stalls: 0, longHolds: 0,
       },
       recentStop: [], recentPed: [], dangerPairs: {}, crashPairs: {}, maxQueue: 0,
       status: { deadlock: null, stall: [], slow: [] },
@@ -959,7 +965,7 @@ export class Simulation {
         risky: false, viol: { solid: false, stop: false, red: false, turn: false }, overStopDist: 0, overStop: false, solidCross: false, illegal: false,
         origDest: null, lcWaitSince: -1, error: null, wrongLane: wrong, committed: [],
         rng: vr, lat: rngNext(vr) * 2 - 1, lat2: rngNext(vr) * 2 - 1, shiftNow: 0, lcYield: -1, lcYieldUntil: 0, lcHelper: -1, route: nv.route ?? null, stopsLeft: route ? route.stops.filter((id) => !!this.stopById(id)) : [], dwellUntil: -1, inBay: false, bayT: 0, bayShift: 0,
-        why: 'free', whyId: -1, stopSince: -1,
+        why: 'free', whyId: -1, stopSince: -1, yieldKind: '', holdLogged: false,
         yieldingAt: -1, yieldTo: -1, ghostUntil: 0, entryPermit: 'none', yellowDecision: 0, crashed: false, crashUntil: 0, stuckSince: -1,
         forcedLogged: false, gridlockLogged: false, danger: -1e9, x: 0, y: 0, h: 0, px: 0, py: 0, ph: 0,
       };
@@ -1394,10 +1400,21 @@ export class Simulation {
       return `Выезд ${c.arm}, полоса ${c.lane}: свободно ${space.available.toFixed(1)} м, требуется ${space.demand.toFixed(1)} м, резервируют ${space.reserved} машин.`;
     }
     if (v.why === 'yield') {
-      if (v.yieldTo === -2) return 'Ограниченная видимость: ожидает окончания разрешения конфликтующему направлению.';
+      const kind = v.yieldKind || (v.yieldTo === -2 ? 'sight' : '');
+      switch (kind) {
+        case 'oncoming': return 'Пропускает встречный поток по пункту 13.4 ПДД и ждёт промежутка или смены сигнала.';
+        case 'storage': return 'За пересечением нет места для всего кузова, поэтому ждёт перед чужим путём по пункту 13.2 ПДД.';
+        case 'sight': return 'Обзор закрыт встречной машиной, водитель осматривается перед выездом.';
+        case 'clearing': return 'Пропускает машину, которая завершает проезд после смены сигнала, пункт 13.8 ПДД.';
+        case 'body': return v.yieldTo >= 0 ? `Впереди на пути находится машина № ${v.yieldTo}.` : 'Ждёт освобождения пути впереди.';
+        case 'reserve':
+        case 'priority': return v.yieldTo >= 0 ? `Пропускает машину № ${v.yieldTo}, она въезжает в общий участок раньше.` : 'Уступает дорогу в общем участке.';
+      }
       const other = this.st.vehicles.find(o => o.id === v.yieldTo);
       return other ? `Участник #${other.id}, ${other.origin} → ${other.dest}, скорость ${(other.v * 3.6).toFixed(1)} км/ч.` : 'Ограничение конфликтной зоны. Уступание может выполняться со снижением скорости без остановки.';
     }
+    if (v.why === 'ped') return 'Ждёт пешеходов на переходе.';
+    if (v.why === 'signal') return v.phase === 'conn' ? 'Ждёт разрешающего сигнала за стоп-линией.' : 'Ждёт разрешающего сигнала.';
     if (v.whyId >= 0 && ['leader', 'merge', 'bus'].includes(v.why)) return `Участник #${v.whyId}`;
     return '';
   }
@@ -1520,25 +1537,28 @@ export class Simulation {
 
   private mustWait(veh: Vehicle, A: number, cr: ConflictRef, dStart: number, dEnd: number): boolean {
     this.blockZone = cr.conflict;
+    this.blockKind = '';
     const cf = this.net.conflicts[cr.conflict];
     const B = cr.other;
+    const priorityKind = this.isTurnLeft(A)
+      && this.net.conns[B].conn.from.arm === this.rel.opposite[this.net.conns[A].conn.from.arm] ? 'oncoming' : 'priority';
     // Адресная договорённость проверяется до исключений для неподвижных
     // кузовов и длительного ожидания: свободный сейчас коридор не отзывает её.
     const recipient = this.acceptedGrantRecipient(veh, A, cr);
-    if (recipient && !this.returnAcceptedGrant(veh, A, cr, recipient)) { this.blocker = recipient.id; return true; }
+    if (recipient && !this.returnAcceptedGrant(veh, A, cr, recipient)) { this.blocker = recipient.id; this.blockKind = 'reserve'; return true; }
     if (cf.body && !this.st.vehicles.some(o => o !== veh && o.conn === B && o.phase !== 'exit'
       && this.bodyConflictApplies(veh, A, o, B))) return false;
     const bStart = cr.side === 'a' ? cf.bStart : cf.aStart;
     const bEnd = cr.side === 'a' ? cf.bEnd : cf.aEnd;
     const sim = this.cfg.sim;
-    this.blocker = -1;
+    this.blocker = -1; this.blockKind = '';
     // Стоящие за стоп-линией на запрещающий сигнал не участвуют в очерёдности.
     // Они остаются только неподвижным препятствием по габаритам.
     if (this.permit[B] === 'none') {
       const parked = this.connLists[B].filter(o => o.overStop);
       if (parked.length && parked.length === this.connLists[B].length) {
         const position = veh.phase === 'approach' ? veh.s - this.net.arms[veh.origin].cfg.approachLength : veh.s;
-        for (const o of parked) if (this.sweepHits(veh, A, Math.max(position, cr.start - veh.len), cr.end + veh.len, o)) { this.blocker = o.id; return true; }
+        for (const o of parked) if (this.sweepHits(veh, A, Math.max(position, cr.start - veh.len), cr.end + veh.len, o)) { this.blocker = o.id; this.blockKind = 'body'; return true; }
         return false;
       }
     }
@@ -1549,7 +1569,7 @@ export class Simulation {
       if (cf.body && !this.bodyConflictApplies(veh, A, o, B)) continue;
         if (o === veh || o.s - o.len >= bEnd) continue;
         const earlier = veh.phase !== 'conn' || o.tStop < veh.tStop || (o.tStop === veh.tStop && compareArrivalOrder(o, veh) < 0);
-        if (earlier && (o.committed.includes(cr.conflict) || o.s >= bStart)) { this.blocker = o.id; return true; }
+        if (earlier && (o.committed.includes(cr.conflict) || o.s >= bStart)) { this.blocker = o.id; this.blockKind = o.committed.includes(cr.conflict) ? 'reserve' : 'body'; return true; }
       }
     }
     if (cf.same) {
@@ -1559,11 +1579,11 @@ export class Simulation {
       for (const o of this.laneLists[from.arm]?.[from.lane] ?? []) {
         if (veh.phase === 'approach' && o !== veh && o.conn === B
           && (o.s > veh.s + .01 || (Math.abs(o.s - veh.s) <= .01 && compareArrivalOrder(o, veh) < 0))) {
-          this.blocker = o.id;
+          this.blocker = o.id; this.blockKind = 'priority';
           return true;
         }
         if (o !== veh && o.conn === B && o.committed.includes(cr.conflict)) {
-          this.blocker = o.id;
+          this.blocker = o.id; this.blockKind = 'reserve';
           return true;
         }
       }
@@ -1577,13 +1597,13 @@ export class Simulation {
         if (veh.phase === 'conn' && o.s < veh.s && this.net.conns[B].siblings.some(sb => sb.conn === A && o.s < sb.until)) continue;
         // Порядок пересечения стоп-линии может отличаться от порядка резервов:
         // не отбираем уже выданный резерв у более быстрого соседнего ряда.
-        if (o.committed.includes(cr.conflict) && !veh.committed.includes(cr.conflict)) { this.blocker = o.id; return true; }
+        if (o.committed.includes(cr.conflict) && !veh.committed.includes(cr.conflict)) { this.blocker = o.id; this.blockKind = 'reserve'; return true; }
         if (veh.committed.includes(cr.conflict) && !o.committed.includes(cr.conflict) && o.s < bStart) continue;
         // Остановившийся до сужения участник не резервирует весь выезд.
         // При возобновлении движения занятость зоны проверяется заново.
         if (cf.kind === 'merge' && o.v < 0.3 && o.s < bStart - 4 && !o.committed.includes(cr.conflict)) continue;
         if (veh.phase === 'conn' && (o.tStop > veh.tStop || (o.tStop === veh.tStop && compareArrivalOrder(o, veh) > 0))) continue;
-        this.blocker = o.id;
+        this.blocker = o.id; this.blockKind = 'priority';
         return true;
       }
       return false;
@@ -1610,10 +1630,10 @@ export class Simulation {
       if (cf.body && !this.bodyConflictApplies(veh, A, o, B)) continue;
         if (o === veh || o.s >= bEnd + o.len) continue;
         // в зоне конфликта или у её края стоит другая машина: проверяем по габаритам, хватит ли места проехать мимо неё
-        if (o.s > bStart - 6 && this.pathHits(veh, A, dEnd + veh.len, o)) { this.blocker = o.id; return true; }
+        if (o.s > bStart - 6 && this.pathHits(veh, A, dEnd + veh.len, o)) { this.blocker = o.id; this.blockKind = 'body'; return true; }
         if (o.s > bStart) continue;
         const moving = o.v > 0.5;
-        if (moving && this.timeToCover(bStart - o.s, o.v, 1.5, Math.max(o.v, 9)) < myClear + 0.5) { this.blocker = o.id; return true; }
+        if (moving && this.timeToCover(bStart - o.s, o.v, 1.5, Math.max(o.v, 9)) < myClear + 0.5) { this.blocker = o.id; this.blockKind = 'body'; return true; }
       }
       // Ожидание внутри перекрёстка не отменяет приближающийся поток:
       // его передняя машина может ещё не пересечь стоп-линию.
@@ -1626,7 +1646,7 @@ export class Simulation {
         if (!sees(dB)) continue;
         if (o.committed.includes(cr.conflict)
           || (o.v > 0.5 && this.timeToCover(dB, o.v, 1.5, Math.max(o.v, 9)) < myClear + 0.5)) {
-          this.blocker = o.id;
+          this.blocker = o.id; this.blockKind = o.committed.includes(cr.conflict) ? 'reserve' : 'body';
           return true;
         }
       }
@@ -1635,7 +1655,7 @@ export class Simulation {
     if (obstr && oncoming && !veh.risky) {
       const pB = this.permit[B];
       if (pB !== 'none' || this.st.t - this.st.permitEnd[B] < 3) {
-        if (this.yieldsToMovement(veh, A, B)) { this.blocker = -2; return true; }
+        if (this.yieldsToMovement(veh, A, B)) { this.blocker = -2; this.blockKind = 'sight'; return true; }
       }
     }
     for (const o of this.connLists[B]) {
@@ -1652,7 +1672,7 @@ export class Simulation {
         // может уже освободить наш коридор, оставаясь внутри этой оболочки.
         if (!completing && o.v < 0.3 && o.a < 0.2 && !this.sweepHits(veh, A, cr.start, cr.end + veh.len, o)) continue;
         if (occl) this.lateSight = true;
-        this.blocker = o.id;
+        this.blocker = o.id; this.blockKind = completing ? 'clearing' : 'body';
         return true;
       }
       // Уступка адресована конкретной машине: ожидание третьего участника
@@ -1664,7 +1684,7 @@ export class Simulation {
         // Иначе принимающий остановится на пути уступившего, отозвав его резерв.
         const position = veh.phase === 'approach' ? veh.s - this.net.arms[veh.origin].cfg.approachLength : veh.s;
         if (this.sweepHits(veh, A, Math.max(0, position), cr.end + veh.len, o)) {
-          this.blocker = o.id;
+          this.blocker = o.id; this.blockKind = 'body';
           return true;
         }
         // Адресная уступка передаёт право проезда. Старый резерв уступившего
@@ -1695,21 +1715,21 @@ export class Simulation {
       // Остановившийся перед зоной владелец резерва может снова тронуться.
       // Бесконечное ETA стоящей машины не освобождает её резерв для встречного потока.
       if (o.committed.includes(cr.conflict)) {
-        this.blocker = o.id;
+        this.blocker = o.id; this.blockKind = 'reserve';
         return true;
       }
       // ПДД 13.8: тем, кто завершает манёвр после смены сигнала, уступаем, даже если они сейчас стоят.
       // Иначе въехавшие на новый сигнал перекрывают им путь и перекрёсток запирается целиком
       if (completing) {
-        this.blocker = o.id;
+        this.blocker = o.id; this.blockKind = 'clearing';
         return true;
       }
       const held = o.v < 0.3 && o.a < 0.2;
       // стоящая у самой зоны машина может задевать траекторию кузовом: проверяем по габаритам
-      if (held && o.s > bStart - 4 && this.sweepHits(veh, A, cr.start, cr.end + veh.len, o)) { this.blocker = o.id; return true; }
+      if (held && o.s > bStart - 4 && this.sweepHits(veh, A, cr.start, cr.end + veh.len, o)) { this.blocker = o.id; this.blockKind = 'body'; return true; }
       const eta = this.approachTime(o, dB);
       if (this.yieldsTo(veh, A, o, B)) {
-        if (eta < Math.max(crit, myClear + 1.0)) { this.blocker = o.id; return true; }
+        if (eta < Math.max(crit, myClear + 1.0)) { this.blocker = o.id; this.blockKind = priorityKind; return true; }
       } else if (eta < myArrive + 0.8 && o.phase === 'conn' && o.v > 2) {
         // Адресно уступающий водитель может ещё двигаться. Если он уже
         // тормозит до зоны, приоритетная машина не должна тормозить в ответ
@@ -1718,7 +1738,7 @@ export class Simulation {
           && dB > o.v * o.v / (-2 * o.a) + 0.3;
         if (brakingYield) continue;
         if (occl) this.lateSight = true;
-        this.blocker = o.id;
+        this.blocker = o.id; this.blockKind = 'body';
         return true;
       }
     }
@@ -1746,16 +1766,16 @@ export class Simulation {
           && this.net.conns[lead.conn].conn.id === this.net.conns[B].conn.id)) continue;
       // Резерв выдаётся до стоп-линии. При возобновлении движения после
       // ожидания учитываем его и на подходе, иначе оба потока въедут в зону.
-      if (o.committed.includes(cr.conflict)) { this.blocker = o.id; return true; }
+      if (o.committed.includes(cr.conflict)) { this.blocker = o.id; this.blockKind = 'reserve'; return true; }
       if (!this.yieldsTo(veh, A, o, B)) {
         // Приоритет не разрешает пересечь путь неизбежно приближающейся машине.
         // Тормозной путь сравнивается с границей конфликта: пересечение
         // стоп-линии само по себе ещё не означает занятие нашего коридора.
-        if (o.v > 3 && dB < (o.v * o.v) / (2 * 4.0) + 1 && this.timeToCover(dB, o.v, 1.5, Math.max(o.v, 9)) < myClear + 1.0) { this.blocker = o.id; return true; }
+        if (o.v > 3 && dB < (o.v * o.v) / (2 * 4.0) + 1 && this.timeToCover(dB, o.v, 1.5, Math.max(o.v, 9)) < myClear + 1.0) { this.blocker = o.id; this.blockKind = 'body'; return true; }
         continue;
       }
       const eta = this.approachTime(o, dB);
-      if (eta < Math.max(crit, myClear + 1.0)) { this.blocker = o.id; return true; }
+      if (eta < Math.max(crit, myClear + 1.0)) { this.blocker = o.id; this.blockKind = priorityKind; return true; }
     }
     return false;
   }
@@ -1879,7 +1899,7 @@ export class Simulation {
     const stop = other.v < 0.5 ? other.s : other.a < -0.1 ? other.s + other.v * other.v / (-2 * other.a) : Infinity;
     if (stop - other.len >= cr.end + veh.len + veh.s0) return false;
     if (sibling && this.acceptSiblingGrant(veh, ci, other)) return false;
-    this.blocker = other.id;
+    this.blocker = other.id; this.blockKind = 'storage';
     return true;
   }
 
@@ -1900,10 +1920,10 @@ export class Simulation {
       if (cf.same && o.tStop > veh.tStop) continue;
       if (cf.body && !this.bodyConflictApplies(veh, veh.conn, o, cr.other)) continue;
       if (o.s > bStart) {
-        if (o.v > 0.5 || this.firstHit(veh, veh.conn, veh.s + 0.3, cr.end + veh.len, o) < Infinity) { this.blocker = o.id; return true; }
+        if (o.v > 0.5 || this.firstHit(veh, veh.conn, veh.s + 0.3, cr.end + veh.len, o) < Infinity) { this.blocker = o.id; this.blockKind = 'body'; return true; }
         continue;
       }
-      if (o.v > 0.5 && this.timeToCover(bStart - o.s, o.v, 1.5, Math.max(o.v, 9)) < myClear + 0.5) { this.blocker = o.id; return true; }
+      if (o.v > 0.5 && this.timeToCover(bStart - o.s, o.v, 1.5, Math.max(o.v, 9)) < myClear + 0.5) { this.blocker = o.id; this.blockKind = 'body'; return true; }
     }
     return false;
   }
@@ -1917,7 +1937,7 @@ export class Simulation {
       if (o === veh || o.v > 2) continue;
       if (cf.body && !this.bodyConflictApplies(veh, veh.conn, o, cr.other)) continue;
       const position = veh.phase === 'approach' ? veh.s - this.net.arms[veh.origin].cfg.approachLength : veh.s;
-      if (o.s > bStart && o.s - o.len < bEnd && (o.v >= 0.3 || o.a >= 0.2 || this.sweepHits(veh, veh.conn, position + 0.3, cr.end + veh.len, o))) { this.blocker = o.id; return true; }
+      if (o.s > bStart && o.s - o.len < bEnd && (o.v >= 0.3 || o.a >= 0.2 || this.sweepHits(veh, veh.conn, position + 0.3, cr.end + veh.len, o))) { this.blocker = o.id; this.blockKind = 'body'; return true; }
     }
     return false;
   }
@@ -2149,13 +2169,14 @@ export class Simulation {
   private accel(veh: Vehicle): number {
     veh.why = 'free';
     veh.whyId = -1;
+    veh.yieldKind = '';
     if (veh.crashed) { veh.why = 'crash'; return 0; }
     const st = this.st;
     const sim = this.cfg.sim;
     if (sim.mode === 'visual' && veh.visualYieldTo !== undefined) {
       const leader = this.vehicleById.get(veh.visualYieldTo);
       if (leader && st.t < (veh.visualYieldUntil ?? Infinity) && (leader.phase !== 'exit' || leader.s <= leader.len)) {
-        veh.why = 'yield'; veh.yieldTo = leader.id;
+        veh.why = 'yield'; veh.yieldTo = leader.id; veh.yieldKind = 'priority';
         veh.whyId = this.net.conns[veh.conn]?.conflicts.find(cr => cr.other === leader.conn)?.conflict ?? -1;
         veh.yieldingAt = veh.whyId;
         return -B_MAX;
@@ -2340,14 +2361,14 @@ export class Simulation {
           for (const cr of this.net.conns[veh.conn].conflicts) {
             if (veh.committed.includes(cr.conflict)) {
               // даже после решения проехать не въезжаем в стоящую в зоне машину
-              if (this.zoneHeld(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; take(dStop + cr.start - 0.8, 0, 'yield', cr.conflict); break; }
+              if (this.zoneHeld(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind; take(dStop + cr.start - 0.8, 0, 'yield', cr.conflict); break; }
               continue;
             }
             const ds = dStop + cr.start, de = dStop + cr.end;
             this.lateSight = false;
             if (this.mustWait(veh, veh.conn, cr, ds, de) || this.wouldStopInside(veh, veh.conn, cr, dStop)) {
               veh.yieldingAt = this.blockZone;
-              veh.yieldTo = this.blocker;
+              veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind;
               take(ds - 1.0 - (this.lateSight ? veh.v * REACTION : 0), 0, 'yield', this.blockZone);
               break;
             } else if (ds < (veh.v * veh.v) / (2 * veh.bcomf) + 1 + veh.s0 && !veh.committed.includes(cr.conflict)) veh.committed.push(cr.conflict);
@@ -2425,9 +2446,9 @@ export class Simulation {
               && (!cf.body || this.bodyConflictApplies(veh, veh.conn, o, cr.other))
               && (o.phase === 'approach' || o.s - o.len < end));
             if (other) {
-              this.blocker = other.id;
+              this.blocker = other.id; this.blockKind = 'reserve';
               veh.yieldingAt = cr.conflict;
-              veh.yieldTo = other.id;
+              veh.yieldTo = other.id; veh.yieldKind = 'reserve';
               take(0, 0, 'yield', cr.conflict);
               break;
             }
@@ -2449,7 +2470,7 @@ export class Simulation {
             // тормозящую машину в последних сантиметрах перед точкой ожидания.
             if (cf.same || gap - veh.s0 >= veh.v * veh.v / (2 * B_MAX) - 1e-9) {
               veh.yieldingAt = cr.conflict;
-              veh.yieldTo = this.blocker;
+              veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind;
               take(gap, 0, 'yield', cr.conflict);
               break;
             }
@@ -2460,21 +2481,21 @@ export class Simulation {
             const gap = this.clearYieldGap(veh, this.blockZone,
               this.clearYieldGap(veh, cr.conflict, cr.start - veh.s - 1));
             if (gap - veh.s0 >= veh.v * veh.v / (2 * B_MAX) - 1e-9) {
-              veh.yieldingAt = this.blockZone; veh.yieldTo = this.blocker;
+              veh.yieldingAt = this.blockZone; veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind;
               take(gap, 0, 'yield', this.blockZone); break;
             }
           }
-          if (cr.start - veh.s > 0.5 && this.zoneHeld(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; take(cr.start - veh.s - 0.8, 0, 'yield', cr.conflict); break; }
+          if (cr.start - veh.s > 0.5 && this.zoneHeld(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind; take(cr.start - veh.s - 0.8, 0, 'yield', cr.conflict); break; }
           // уже в зоне: стоящую впереди поперёк пути машину объезжать некуда, ждём
           let hit = Infinity;
           for (const o of this.connLists[cr.other]) {
             if (o === veh || o.v > 2 || o.crashed) continue;
             const candidate = this.firstHit(veh, veh.conn, veh.s + 0.3, Math.min(veh.s + 8, cr.end + veh.len), o);
-            if (candidate < hit) { hit = candidate; this.blocker = o.id; }
+            if (candidate < hit) { hit = candidate; this.blocker = o.id; this.blockKind = 'body'; }
           }
-          if (hit < Infinity) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; take(Math.max(0, hit - veh.s - 0.6), 0, 'yield', cr.conflict); break; }
+          if (hit < Infinity) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind; take(Math.max(0, hit - veh.s - 0.6), 0, 'yield', cr.conflict); break; }
           // стоит у края зоны и собирается тронуться: пропускает тех, кто уже въезжает в зону
-          if (veh.v < 1 && cr.start - veh.s > -0.5 && this.othersEntering(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; take(Math.max(0, cr.start - veh.s - 0.3), 0, 'yield', cr.conflict); break; }
+          if (veh.v < 1 && cr.start - veh.s > -0.5 && this.othersEntering(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind; take(Math.max(0, cr.start - veh.s - 0.3), 0, 'yield', cr.conflict); break; }
           continue;
         }
         const ds = cr.start - veh.s, de = cr.end - veh.s;
@@ -2482,7 +2503,7 @@ export class Simulation {
         this.lateSight = false;
         if (this.mustWait(veh, veh.conn, cr, ds, de) || this.wouldStopInside(veh, veh.conn, cr, -veh.s)) {
           veh.yieldingAt = this.blockZone;
-          veh.yieldTo = this.blocker;
+          veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind;
           take(ds - 1.0 - (this.lateSight ? veh.v * REACTION : 0), 0, 'yield', this.blockZone);
           break;
         } else if (ds < (veh.v * veh.v) / (2 * veh.bcomf) + 1 + veh.s0 && !veh.committed.includes(cr.conflict)) veh.committed.push(cr.conflict);
@@ -2732,7 +2753,7 @@ export class Simulation {
         veh.illegal = false;
         veh.committed = []; veh.acceptedGrants = undefined;
         veh.yieldingAt = -1;
-        veh.yieldTo = -1;
+        veh.yieldTo = -1; veh.yieldKind = '';
         veh.stuckSince = -1;
         veh.lcWaitSince = -1;
         if (afterSolid) {
@@ -3153,6 +3174,12 @@ export class Simulation {
     const t = st.t;
     for (const v of st.vehicles) {
       if (v.v < 0.3) { if (v.stopSince < 0) v.stopSince = t; } else if (v.v > 0.8) v.stopSince = -1;
+      if (!v.holdLogged && v.phase === 'conn' && v.v < 0.3 && v.stopSince >= 0
+        && t - v.stopSince >= 20 && v.why !== 'signal' && v.why !== 'crash') {
+        v.holdLogged = true;
+        st.counters.longHolds++;
+        this.addLog('info', 'hold', this.explainVehicle(v) || 'Ожидает начала движения.', undefined, v.id);
+      }
     }
     // граф ожидания: кто кого ждёт среди давно стоящих машин
     const edges = new Map<number, number[]>();
@@ -3400,6 +3427,8 @@ export class Simulation {
     this.st = structuredClone(snap);
     this.st.counters.interventions ??= 0;
     this.st.counters.removedRecovery ??= 0;
+    this.st.counters.longHolds ??= 0;
+    for (const v of this.st.vehicles) { v.yieldKind ??= ''; v.holdLogged ??= false; }
     const t = this.st.t;
     const s = this.series;
     let n = s.t.length;

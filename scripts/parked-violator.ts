@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { TEMPLATES } from '../src/engine/presets';
 import { compileModel } from '../src/engine/compile';
-import { Simulation } from '../src/engine/sim';
+import { Simulation, type Vehicle } from '../src/engine/sim';
 
 const cfg = TEMPLATES.find(t => t.id === 'worked')!.make();
 cfg.sim.seed = 42;
@@ -34,3 +34,32 @@ try {
   assert.equal(sim.st.counters.deadlocks, 0);
   console.log(`Стоящие на красный не удерживают зоны, автомобиль № 52 освободил перекрёсток при t=${clearedAt.toFixed(1)}.`);
 } finally { sim.dispose(); }
+
+const priorityCfg = TEMPLATES.find(t => t.id === 'kolpino')!.make();
+priorityCfg.sim.seed = 42; priorityCfg.sim.mode = 'strict'; priorityCfg.sim.diagnosticRecovery = false;
+const prioritySim = new Simulation(priorityCfg, compileModel(priorityCfg).code, { headless: true });
+try {
+  prioritySim.runUntil(60);
+  const base = prioritySim.st.vehicles[0]; assert.ok(base);
+  const turn = prioritySim.net.conns.find(c => c.conn.id === 'E0-S0' && c.variant === 0)!;
+  const straight = prioritySim.net.conns.find(c => c.conn.id === 'W1-E1' && c.variant === 0)!;
+  assert.equal(turn.kind, 'left');
+  const waiting: Vehicle = { ...structuredClone(base), id: 10001, origin: 'E', dest: 'S',
+    conn: turn.idx, phase: 'approach', lane: 0, targetLane: 0, lcT: -1,
+    s: prioritySim.net.arms.E.cfg.approachLength - 2.5, v: 0, a: 0,
+    kind: 'car', len: 4.5, wid: 1.8, route: null, stopsLeft: [], dwellUntil: -1,
+    committed: [], acceptedGrants: undefined, yieldTo: -1, yieldingAt: -1,
+    crashed: false, overStop: false, goSince: -1 };
+  const oncoming: Vehicle = { ...structuredClone(waiting), id: 10002, origin: 'W', dest: 'E',
+    conn: straight.idx, lane: 1, targetLane: 1,
+    s: prioritySim.net.arms.W.cfg.approachLength - 8, v: 8 };
+  prioritySim.st.vehicles = [waiting, oncoming]; prioritySim.st.peds = []; prioritySim.permit.fill('main');
+  for (const v of prioritySim.st.vehicles) prioritySim.pose(v);
+  const internal = prioritySim as unknown as { index(): void; accel(v: Vehicle): number };
+  internal.index(); internal.accel(waiting);
+  assert.equal(waiting.why, 'yield', 'Левый поворот должен уступить приближающемуся встречному потоку');
+  assert.equal(waiting.yieldTo, oncoming.id);
+  assert.equal(waiting.yieldKind, 'oncoming', 'Причина ожидания должна объяснять встречный приоритет');
+  assert.match(prioritySim.explainVehicle(waiting), /встречный поток/);
+  console.log('Незащищённый левый поворот объясняет ожидание встречного потока.');
+} finally { prioritySim.dispose(); }

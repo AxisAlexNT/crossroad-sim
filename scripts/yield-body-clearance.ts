@@ -24,6 +24,7 @@ try {
   sim.st.vehicles = [receiver, giver]; sim.st.peds = []; sim.permit.fill('none'); sim.permit[straight.idx] = 'main';
   for (const v of sim.st.vehicles) sim.pose(v);
   const internal = sim as unknown as {
+    blockKind: Vehicle['yieldKind'];
     index(): void;
     mustWait(v: Vehicle, ci: number, r: ConflictRef, start: number, end: number): boolean;
     firstHit(v: Vehicle, ci: number, from: number, until: number, other: Vehicle): number;
@@ -34,6 +35,7 @@ try {
   const offset = -receiver.s;
   assert.equal(internal.mustWait(receiver, turn.idx, receivingRef, offset + receivingRef.start, offset + receivingRef.end), true,
     'Адресная уступка не разрешает въехать на занятый кузовом путь');
+  assert.equal(internal.blockKind, 'body', 'Занятый кузовом путь должен иметь габаритную причину ожидания');
   assert.ok(giver.committed.includes(ref.conflict), 'Небезопасное принятие не отзывает прежний резерв');
   console.log('Адресная уступка принимается только при физически свободном пути.');
 } finally { sim.dispose(); }

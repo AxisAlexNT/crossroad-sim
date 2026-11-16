@@ -27,6 +27,11 @@ try {
   const internal = sim as unknown as { index(): void; accel(v: Vehicle): number };
   internal.index(); internal.accel(car);
   assert.equal(car.why, 'yield'); assert.equal(car.yieldTo, bus.id);
+  const zone = sim.net.conflicts[common.conflict];
+  const busStart = zone.a === bus.conn ? zone.aStart : zone.bStart;
+  assert.ok(bus.s < busStart, 'Ожидаемый участник ещё не въехал в общее пересечение');
+  assert.equal(car.yieldKind, 'priority', 'Вложенная проверка объясняет очерёдность до общего пересечения');
+  assert.match(sim.explainVehicle(car), new RegExp('№ ' + bus.id));
   assert.equal(car.whyId, common.conflict, 'Причина должна указывать общее пересечение с фактическим адресатом уступки');
   assert.equal(car.yieldingAt, common.conflict, 'Адресная уступка относится к реальной общей зоне, даже при остановке перед более ранней зоной');
   console.log('Вложенная проверка сохраняет зону фактической уступки.');
