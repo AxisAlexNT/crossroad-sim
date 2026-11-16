@@ -1529,6 +1529,16 @@ export class Simulation {
     const bEnd = cr.side === 'a' ? cf.bEnd : cf.aEnd;
     const sim = this.cfg.sim;
     this.blocker = -1;
+    // Стоящие за стоп-линией на запрещающий сигнал не участвуют в очерёдности.
+    // Они остаются только неподвижным препятствием по габаритам.
+    if (this.permit[B] === 'none') {
+      const parked = this.connLists[B].filter(o => o.overStop);
+      if (parked.length && parked.length === this.connLists[B].length) {
+        const position = veh.phase === 'approach' ? veh.s - this.net.arms[veh.origin].cfg.approachLength : veh.s;
+        for (const o of parked) if (this.sweepHits(veh, A, Math.max(position, cr.start - veh.len), cr.end + veh.len, o)) { this.blocker = o.id; return true; }
+        return false;
+      }
+    }
     if (cf.kind === 'merge' && this.net.conns[A].conn.from.arm === this.net.conns[B].conn.from.arm) {
       // Резерв сужения действует до выхода заднего края: ранний въезд не должен
       // терять место из-за более короткой соседней траектории.
@@ -2377,7 +2387,10 @@ export class Simulation {
       }
       // выбирается из неразрешимой блокировки: в модели водители разъезжаются вручную
       const ghost = veh.ghostUntil > st.t;
-      for (const cr of ghost ? [] : c.conflicts) {
+      // Ожидающий сигнала за стоп-линией не резервирует зоны конфликтов.
+      const parked = veh.overStop && this.permit[veh.conn] === 'none';
+      if (parked) { veh.committed = []; veh.acceptedGrants = undefined; }
+      for (const cr of ghost || parked ? [] : c.conflicts) {
         if (cr.end + veh.len < veh.s) continue;
         if (veh.committed.includes(cr.conflict)) {
           // Пока владелец резерва стоял вне фактического коридора, другой
