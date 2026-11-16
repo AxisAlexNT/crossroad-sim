@@ -64,6 +64,17 @@ assert.equal(suppliedExperiment.sim.mode, 'visual');
 assert.equal(suppliedExperiment.sim.dt, .2);
 assert.equal(compareExperiments(exp, structuredClone(exp), 'avgWait').mean, 0);
 assert.equal(parseExperiment(JSON.parse(JSON.stringify(exp))).runs.length, 2);
+const legacySpeed = JSON.parse(JSON.stringify(exp));
+for (const run of legacySpeed.runs) delete run.summary.busAvgSpeed;
+const parsedLegacySpeed = parseExperiment(legacySpeed);
+assert.ok(parsedLegacySpeed.runs.every(run => run.summary.busAvgSpeed === undefined),
+  'Старый результат не должен получать вымышленную нулевую скорость');
+assert.throws(() => compareExperiments(parsedLegacySpeed, exp, 'busAvgSpeed'), /не записана/,
+  'Сравнение нового показателя требует измерений в обоих результатах');
+const invalidSpeed = JSON.parse(JSON.stringify(exp));
+invalidSpeed.runs[0].summary.busAvgSpeed = -1;
+assert.throws(() => parseExperiment(invalidSpeed), /Повреждённые показатели/);
+
 assert.throws(() => parseExperiment({ ...exp, version: 2 }));
 console.log('Таймеры и эксперименты: успешно');
 

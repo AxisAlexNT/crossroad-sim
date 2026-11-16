@@ -42,7 +42,8 @@ export function compareExperiments(a: ExperimentResult, b: ExperimentResult, met
   const demand = (r: ExperimentResult) => JSON.stringify([r.spec.cfg.spawners, r.spec.cfg.peds.sources, r.spec.cfg.transit]);
   if (demand(a) !== demand(b)) throw new Error('Различается входной спрос или маршруты: парное сравнение не выполняется.');
   if (a.runs.length !== a.spec.seeds.length || b.runs.length !== b.spec.seeds.length || [...a.runs, ...b.runs].some(r => r.status !== 'complete' || r.interventions > 0 || !!r.invalidReasons?.length || r.summary.errors > 0 || r.summary.collisions > 0 || r.summary.pedHits > 0 || r.summary.deadlocks > 0)) throw new Error('Нужны завершённые прогоны без вмешательств.');
-  const differences = a.runs.map((r, i) => b.runs[i].summary[metric] - r.summary[metric]);
+  if (metric === 'busAvgSpeed' && [...a.runs, ...b.runs].some(r => r.summary.busAvgSpeed === undefined)) throw new Error('В одном из результатов не записана средняя скорость автобусов.');
+  const differences = a.runs.map((r, i) => (b.runs[i].summary[metric] ?? NaN) - (r.summary[metric] ?? NaN));
   if (differences.some(x => !Number.isFinite(x))) throw new Error('Показатель сравнения должен быть конечным числом.');
   const n = differences.length, mean = differences.reduce((s, x) => s + x, 0) / n;
   const variance = n > 1 ? differences.reduce((s, x) => s + (x - mean) ** 2, 0) / (n - 1) : 0;
@@ -59,10 +60,12 @@ export function parseExperiment(input: unknown): ExperimentResult {
   validateExperiment(r.spec);
   r.spec.cfg = normalizeModel(r.spec.cfg);
   if (r.runs.length !== r.spec.seeds.length) throw new Error('Неполный набор повторов.');
-  const keys: Array<keyof Summary> = ['horizon', 'crossed', 'throughputVph', 'avgWait', 'avgDelay', 'worstWait', 'maxQueue', 'dangers', 'collisions', 'errors', 'crossings', 'unserved', 'pedDone', 'pedAvgWait', 'pedDangers', 'pedHits', 'missedTurns', 'violations', 'deadlocks', 'busServed'];
+  const keys: Array<Exclude<keyof Summary, 'busAvgSpeed'>> = ['horizon', 'crossed', 'throughputVph', 'avgWait', 'avgDelay', 'worstWait', 'maxQueue', 'dangers', 'collisions', 'errors', 'crossings', 'unserved', 'pedDone', 'pedAvgWait', 'pedDangers', 'pedHits', 'missedTurns', 'violations', 'deadlocks', 'busServed'];
   for (let i = 0; i < r.runs.length; i++) {
     const run = r.runs[i];
     if (run.seed !== r.spec.seeds[i] || !['complete', 'invalid'].includes(run.status) || !Number.isInteger(run.interventions) || run.interventions < 0 || !run.summary || keys.some(k => !Number.isFinite(run.summary[k]) || run.summary[k] < 0)) throw new Error('Повреждённые показатели повтора.');
+    const busSpeed = run.summary.busAvgSpeed;
+    if (busSpeed !== undefined && (!Number.isFinite(busSpeed) || busSpeed < 0)) throw new Error('Повреждённые показатели повтора.');
     if (run.invalidReasons !== undefined && (!Array.isArray(run.invalidReasons) || run.invalidReasons.some(x => typeof x !== 'string'))) throw new Error('Повреждённые причины непригодности.');
     if ((run.interventions || run.invalidReasons?.length || run.summary.errors || run.summary.collisions || run.summary.pedHits || run.summary.deadlocks) && run.status !== 'invalid') throw new Error('Прогон с вмешательствами не может считаться пригодным.');
     if (!run.series || !Array.isArray(run.series.t) || run.series.t.length > 100000 || !Array.isArray(run.series.avgWait) || run.series.avgWait.length !== run.series.t.length) throw new Error('Повреждённые временные ряды.');

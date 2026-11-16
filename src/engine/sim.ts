@@ -90,6 +90,8 @@ export interface Vehicle {
   route: string | null;
   stopsLeft: string[];
   dwellUntil: number;
+  /** Суммарное заданное время стоянки на остановках, с. */
+  dwellSum: number;
   inBay: boolean;
   bayT: number;
   /** На сколько полос левее кармана автобус стоял перед заездом в него */
@@ -168,6 +170,14 @@ export interface Crash {
   blocks: Array<{ conn: number; s: number }>;
 }
 
+export interface TripTotals {
+  n: number;
+  time: number;
+  dist: number;
+  wait: number;
+  dwell: number;
+}
+
 export interface Counters {
   spawned: number;
   crossedStop: number;
@@ -215,6 +225,7 @@ export interface Counters {
   deadlocks: number;
   stalls: number;
   longHolds: number;
+  trips: Record<string, TripTotals>;
 }
 
 export interface DeadlockInfo {
@@ -378,6 +389,8 @@ export interface Summary {
   violations: number;
   deadlocks: number;
   busServed: number;
+  /** По завершённым поездкам рейсовых автобусов, км/ч. В старых результатах может отсутствовать. */
+  busAvgSpeed?: number;
 }
 
 /** Пешеходы ждут сигнала на таком расстоянии от края проезжей части, м */
@@ -621,7 +634,7 @@ export class Simulation {
         spawned: 0, crossedStop: 0, exited: 0, sumWait: 0, waitArea: 0, delayArea: 0, waitAreaBy: {}, pedWaitArea: 0, crossedBy: {}, waitBy: {}, sumDelay: 0, errors: 0, collisions: 0, dangers: 0, crossings: 0,
         forcedLC: 0, gridlock: 0, codeErrors: 0, removedCrash: 0, dropped: 0, interventions: 0, removedRecovery: 0,
         pedSpawned: 0, pedDropped: 0, pedDone: 0, pedWaitSum: 0, pedDangers: 0, pedHits: 0, pedRouteErrors: 0,
-        missedTurns: 0, violSolid: 0, violStop: 0, violRed: 0, violTurn: 0, busSpawned: 0, busServed: 0, busDwellSum: 0, deadlocks: 0, stalls: 0, longHolds: 0,
+        missedTurns: 0, violSolid: 0, violStop: 0, violRed: 0, violTurn: 0, busSpawned: 0, busServed: 0, busDwellSum: 0, deadlocks: 0, stalls: 0, longHolds: 0, trips: {},
       },
       recentStop: [], recentPed: [], dangerPairs: {}, crashPairs: {}, maxQueue: 0,
       status: { deadlock: null, stall: [], slow: [] },
@@ -835,6 +848,7 @@ export class Simulation {
         if (!this.net.reachableBus[r.from]?.some((x) => x.includes(r.to))) continue;
         this.enqueueDemand(r.from, { destination: r.to, kind: 'bus', length: r.length, route: r.id, at }, rs, 'bus:' + r.id);
         st.counters.busSpawned++;
+        st.counters.trips['route:' + r.id] ??= { n: 0, time: 0, dist: 0, wait: 0, dwell: 0 };
       }
     }
   }
@@ -964,7 +978,7 @@ export class Simulation {
         s0: gap, v0f: speedF, reaction, goSince: -1, haltT: -1, tWanted: item.t, tEnter: entered, tStop: -1, stopTime: entered - item.t,
         risky: false, viol: { solid: false, stop: false, red: false, turn: false }, overStopDist: 0, overStop: false, solidCross: false, illegal: false,
         origDest: null, lcWaitSince: -1, error: null, wrongLane: wrong, committed: [],
-        rng: vr, lat: rngNext(vr) * 2 - 1, lat2: rngNext(vr) * 2 - 1, shiftNow: 0, lcYield: -1, lcYieldUntil: 0, lcHelper: -1, route: nv.route ?? null, stopsLeft: route ? route.stops.filter((id) => !!this.stopById(id)) : [], dwellUntil: -1, inBay: false, bayT: 0, bayShift: 0,
+        rng: vr, lat: rngNext(vr) * 2 - 1, lat2: rngNext(vr) * 2 - 1, shiftNow: 0, lcYield: -1, lcYieldUntil: 0, lcHelper: -1, route: nv.route ?? null, stopsLeft: route ? route.stops.filter((id) => !!this.stopById(id)) : [], dwellUntil: -1, dwellSum: 0, inBay: false, bayT: 0, bayShift: 0,
         why: 'free', whyId: -1, stopSince: -1, yieldKind: '', holdLogged: false,
         yieldingAt: -1, yieldTo: -1, ghostUntil: 0, entryPermit: 'none', yellowDecision: 0, crashed: false, crashUntil: 0, stuckSince: -1,
         forcedLogged: false, gridlockLogged: false, danger: -1e9, x: 0, y: 0, h: 0, px: 0, py: 0, ph: 0,
@@ -2829,6 +2843,7 @@ export class Simulation {
           veh.v = 0;
           st.counters.busServed++;
           st.counters.busDwellSum += dwell;
+          veh.dwellSum += dwell;
           this.pushSample(this.samples.dwell, veh.origin, dwell);
         }
       }
@@ -2905,7 +2920,18 @@ export class Simulation {
           if (ok) {
             removed.add(veh);
             st.counters.exited++;
-            const free = (this.net.arms[veh.origin].cfg.approachLength + (veh.conn >= 0 ? this.net.conns[veh.conn].path.length : 30) + xarm.cfg.exitLength) / Math.max(5, (xarm.cfg.speedLimit / 3.6) * 0.9);
+            const distance = this.net.arms[veh.origin].cfg.approachLength + (veh.conn >= 0 ? this.net.conns[veh.conn].path.length : 30) + xarm.cfg.exitLength;
+            const keys = [`od:${veh.origin}>${veh.dest}`];
+            if (veh.route) keys.push(`route:${veh.route}`);
+            for (const key of keys) {
+              const trip = (st.counters.trips[key] ??= { n: 0, time: 0, dist: 0, wait: 0, dwell: 0 });
+              trip.n++;
+              trip.time += st.t - veh.tEnter;
+              trip.dist += distance;
+              trip.wait += veh.stopTime;
+              trip.dwell += veh.dwellSum;
+            }
+            const free = distance / Math.max(5, (xarm.cfg.speedLimit / 3.6) * 0.9);
             const delay = Math.max(0, st.t - veh.tWanted - free);
             st.counters.sumDelay += delay;
             this.pushSample(this.samples.delay, veh.origin, delay);
@@ -3428,7 +3454,8 @@ export class Simulation {
     this.st.counters.interventions ??= 0;
     this.st.counters.removedRecovery ??= 0;
     this.st.counters.longHolds ??= 0;
-    for (const v of this.st.vehicles) { v.yieldKind ??= ''; v.holdLogged ??= false; }
+    this.st.counters.trips ??= {};
+    for (const v of this.st.vehicles) { v.yieldKind ??= ''; v.holdLogged ??= false; v.dwellSum ??= 0; }
     const t = this.st.t;
     const s = this.series;
     let n = s.t.length;
@@ -3483,6 +3510,13 @@ export class Simulation {
     const worstWait = Math.max(0, ...this.armList.map((d) => armWait[d] / Math.max(1, armN[d])));
     const exited = c.exited - w.exited;
     const pedDone = c.pedDone - w.pedDone;
+    let busDistance = 0, busTime = 0;
+    for (const [key, trip] of Object.entries(c.trips ?? {})) {
+      if (!key.startsWith('route:')) continue;
+      const previous = w.trips?.[key];
+      busDistance += trip.dist - (previous?.dist ?? 0);
+      busTime += trip.time - (previous?.time ?? 0);
+    }
     return {
       horizon, crossed,
       throughputVph: (crossed / horizon) * 3600,
@@ -3503,6 +3537,7 @@ export class Simulation {
       violations: c.violSolid + c.violStop + c.violRed + c.violTurn - (w.violSolid + w.violStop + w.violRed + w.violTurn),
       deadlocks: c.deadlocks - w.deadlocks,
       busServed: c.busServed - w.busServed,
+      busAvgSpeed: busTime > 0 ? busDistance / busTime * 3.6 : 0,
     };
   }
 }
