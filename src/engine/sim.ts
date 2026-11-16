@@ -458,6 +458,8 @@ export class Simulation {
   private bayReady: Record<string, Vehicle[]> = {};
   /** Кто заставил уступить при последней проверке mustWait */
   private blocker = -1;
+  /** Фактическая зона уступки при вложенной проверке места дальше по пути. */
+  private blockZone = -1;
   private connLists: Vehicle[][] = [];
   private vehicleById = new Map<number, Vehicle>();
   private exitLists: Record<ArmId, Vehicle[][]> = {};
@@ -1517,6 +1519,7 @@ export class Simulation {
   }
 
   private mustWait(veh: Vehicle, A: number, cr: ConflictRef, dStart: number, dEnd: number): boolean {
+    this.blockZone = cr.conflict;
     const cf = this.net.conflicts[cr.conflict];
     const B = cr.other;
     // Адресная договорённость проверяется до исключений для неподвижных
@@ -1657,6 +1660,13 @@ export class Simulation {
       const givesWay = o.yieldingAt === cf.id && o.yieldTo === veh.id && o.v < 0.5
         && (veh.yieldingAt !== cf.id || (veh.yieldTo === o.id && veh.v < 0.5 && compareArrivalOrder(veh, o) < 0));
       if (givesWay) {
+        // Согласие уступить не освобождает место, занятое самим кузовом.
+        // Иначе принимающий остановится на пути уступившего, отозвав его резерв.
+        const position = veh.phase === 'approach' ? veh.s - this.net.arms[veh.origin].cfg.approachLength : veh.s;
+        if (this.sweepHits(veh, A, Math.max(0, position), cr.end + veh.len, o)) {
+          this.blocker = o.id;
+          return true;
+        }
         // Адресная уступка передаёт право проезда. Старый резерв уступившего
         // больше не позволяет ему тронуться перед принявшей уступку машиной.
         o.committed = o.committed.filter(id => id !== cf.id);
@@ -1826,9 +1836,17 @@ export class Simulation {
    * а сразу за зоной придётся остановиться и уступить: иначе машина встанет у них на пути, ПДД 13.2
    */
   private wouldStopInside(veh: Vehicle, ci: number, cr: ConflictRef, offset: number): boolean {
+    this.blockZone = cr.conflict;
+    const zone = this.net.conflicts[cr.conflict];
     // слияние траекторий из одной полосы — обычное следование, встать в нём поперёк чужого пути нельзя
-    if (this.net.conflicts[cr.conflict].same) return false;
-    if (this.net.conflicts[cr.conflict].body && !this.st.vehicles.some(o => o !== veh && o.conn === cr.other && o.phase !== 'exit'
+    if (zone.same) return false;
+    // Слияние и общий входной коридор полос одного подхода не являются
+    // поперечным потоком. Фактическую занятость и очередь проверяет mustWait.
+    // Кузовные пересечения дальше от входа по-прежнему требуют места за зоной.
+    const sharedEntry = zone.body && zone.aStart === 0 && zone.bStart === 0;
+    if ((zone.kind === 'merge' || sharedEntry)
+      && this.net.conns[ci].conn.from.arm === this.net.conns[cr.other].conn.from.arm) return false;
+    if (zone.body && !this.st.vehicles.some(o => o !== veh && o.conn === cr.other && o.phase !== 'exit'
       && this.bodyConflictApplies(veh, ci, o, cr.other))) return false;
     // Не занимать пересекающийся поток, если неподвижный лидер не оставляет
     // места для всего кузова за зоной. Это касается и ещё общего участка вариантов.
@@ -2328,9 +2346,9 @@ export class Simulation {
             const ds = dStop + cr.start, de = dStop + cr.end;
             this.lateSight = false;
             if (this.mustWait(veh, veh.conn, cr, ds, de) || this.wouldStopInside(veh, veh.conn, cr, dStop)) {
-              veh.yieldingAt = cr.conflict;
+              veh.yieldingAt = this.blockZone;
               veh.yieldTo = this.blocker;
-              take(ds - 1.0 - (this.lateSight ? veh.v * REACTION : 0), 0, 'yield', cr.conflict);
+              take(ds - 1.0 - (this.lateSight ? veh.v * REACTION : 0), 0, 'yield', this.blockZone);
               break;
             } else if (ds < (veh.v * veh.v) / (2 * veh.bcomf) + 1 + veh.s0 && !veh.committed.includes(cr.conflict)) veh.committed.push(cr.conflict);
           }
@@ -2439,10 +2457,11 @@ export class Simulation {
           // Право проезда не создаёт свободное место за зоной: очередь могла
           // остановиться уже после выдачи резерва, в том числе до смены сигнала.
           if (cr.start - veh.s > 0.5 && this.wouldStopInside(veh, veh.conn, cr, -veh.s)) {
-            const gap = this.clearYieldGap(veh, cr.conflict, cr.start - veh.s - 1);
+            const gap = this.clearYieldGap(veh, this.blockZone,
+              this.clearYieldGap(veh, cr.conflict, cr.start - veh.s - 1));
             if (gap - veh.s0 >= veh.v * veh.v / (2 * B_MAX) - 1e-9) {
-              veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker;
-              take(gap, 0, 'yield', cr.conflict); break;
+              veh.yieldingAt = this.blockZone; veh.yieldTo = this.blocker;
+              take(gap, 0, 'yield', this.blockZone); break;
             }
           }
           if (cr.start - veh.s > 0.5 && this.zoneHeld(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; take(cr.start - veh.s - 0.8, 0, 'yield', cr.conflict); break; }
@@ -2462,9 +2481,9 @@ export class Simulation {
         if (ds <= 0.2) { veh.committed.push(cr.conflict); continue; }
         this.lateSight = false;
         if (this.mustWait(veh, veh.conn, cr, ds, de) || this.wouldStopInside(veh, veh.conn, cr, -veh.s)) {
-          veh.yieldingAt = cr.conflict;
+          veh.yieldingAt = this.blockZone;
           veh.yieldTo = this.blocker;
-          take(ds - 1.0 - (this.lateSight ? veh.v * REACTION : 0), 0, 'yield', cr.conflict);
+          take(ds - 1.0 - (this.lateSight ? veh.v * REACTION : 0), 0, 'yield', this.blockZone);
           break;
         } else if (ds < (veh.v * veh.v) / (2 * veh.bcomf) + 1 + veh.s0 && !veh.committed.includes(cr.conflict)) veh.committed.push(cr.conflict);
       }

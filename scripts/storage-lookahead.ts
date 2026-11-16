@@ -40,9 +40,16 @@ try {
   const allRefs = turn.conflicts;
   turn.conflicts = [cr, later];
   waiting.committed = [cr.conflict];
-  internal.accel(waiting);
+  const savedPosition = waiting.s;
+  waiting.s = cr.start - 4; waiting.v = 2;
+  sim.pose(waiting); internal.index();
+  const braking = internal.accel(waiting);
   assert.equal(waiting.why, 'yield');
-  assert.equal(waiting.whyId, cr.conflict, 'A reservation must stop before its crossing when downstream storage disappears');
+  assert.equal(waiting.whyId, later.conflict, 'Причина должна указывать занятую зону дальше по пути');
+  assert.equal(waiting.yieldingAt, later.conflict, 'Уступка адресована фактической конфликтной зоне');
+  assert.ok(braking < 0, 'Резерв не отменяет торможение перед ранним пересечением, если дальше нет места');
+  waiting.s = savedPosition; waiting.v = 0;
+  sim.pose(waiting); internal.index();
   waiting.committed = [];
   turn.conflicts = allRefs;
   blockage.s = downstream.path.length + blockage.len + 2;
