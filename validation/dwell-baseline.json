@@ -1,6 +1,6 @@
 {
   "format": "crossroad-dwell-baseline",
-  "version": 1,
+  "version": 2,
   "horizon": 3600,
   "seeds": [
     42,
@@ -12,73 +12,109 @@
       "model": "worked",
       "meanWait": 82.7134371164505,
       "exited": 4713,
-      "standing": 7
+      "standing": 7,
+      "delayAreaHistorical": 602985.5440335524,
+      "missedTurnsAccepted": 391,
+      "dangerBoundUnchanged": 60.949999999999996
     },
     {
       "model": "v1",
       "meanWait": 86.34527761749816,
       "exited": 4024,
-      "standing": 53
+      "standing": 53,
+      "delayAreaHistorical": 840993.4539685784,
+      "missedTurnsAccepted": 330,
+      "dangerBoundUnchanged": 80.5
     },
     {
       "model": "v1a",
       "meanWait": 88.09125683612517,
       "exited": 4039,
-      "standing": 53
+      "standing": 53,
+      "delayAreaHistorical": 819940.7327135683,
+      "missedTurnsAccepted": 309,
+      "dangerBoundUnchanged": 154.1
     },
     {
       "model": "v2",
       "meanWait": 143.08490447868198,
       "exited": 4034,
-      "standing": 55
+      "standing": 55,
+      "delayAreaHistorical": 777347.8965417375,
+      "missedTurnsAccepted": 166,
+      "dangerBoundUnchanged": 170.2
     },
     {
       "model": "v3",
       "meanWait": 208.15761645231055,
       "exited": 3835,
-      "standing": 4
+      "standing": 4,
+      "delayAreaHistorical": 1076431.1882940624,
+      "missedTurnsAccepted": 139,
+      "dangerBoundUnchanged": 65.55
     },
     {
       "model": "v4",
       "meanWait": 159.09127728727037,
       "exited": 4046,
-      "standing": 63
+      "standing": 63,
+      "delayAreaHistorical": 844301.0353686644,
+      "missedTurnsAccepted": 283,
+      "dangerBoundUnchanged": 170.2
     },
     {
       "model": "v5",
       "meanWait": 84.12906371883756,
       "exited": 4155,
-      "standing": 56
+      "standing": 56,
+      "delayAreaHistorical": 494815.399187658,
+      "missedTurnsAccepted": 187,
+      "dangerBoundUnchanged": 60.949999999999996
     },
     {
       "model": "worked",
       "meanWait": 82.7134371164505,
       "exited": 4713,
-      "standing": 7
+      "standing": 7,
+      "delayAreaHistorical": 602985.5440335524,
+      "missedTurnsAccepted": 391,
+      "dangerBoundUnchanged": 60.949999999999996
     },
     {
       "model": "kolpino",
       "meanWait": 86.34527761749816,
       "exited": 4024,
-      "standing": 53
+      "standing": 53,
+      "delayAreaHistorical": 840993.4539685784,
+      "missedTurnsAccepted": 330,
+      "dangerBoundUnchanged": 80.5
     },
     {
       "model": "cross4",
       "meanWait": 30.771506362138492,
       "exited": 3452,
-      "standing": 16
+      "standing": 16,
+      "delayAreaHistorical": 147767.36958002087,
+      "missedTurnsAccepted": 79,
+      "dangerBoundUnchanged": 46.0
     },
     {
       "model": "tee",
       "meanWait": 16.22383546644977,
       "exited": 2454,
-      "standing": 0
+      "standing": 0,
+      "delayAreaHistorical": 62821.706496912026,
+      "missedTurnsAccepted": 17,
+      "dangerBoundUnchanged": 57.49999999999999
     },
     {
       "model": "skew",
       "meanWait": 29.888128012830364,
       "exited": 2564,
-      "standing": 17
+      "standing": 17,
+      "delayAreaHistorical": 108378.70104678489,
+      "missedTurnsAccepted": 6,
+      "dangerBoundUnchanged": 181.7
     }
   ]
 }
