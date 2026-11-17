@@ -2,6 +2,7 @@
 import { PRESETS, TEMPLATES, kolpinoModel } from '../src/engine/presets';
 import { compileModel } from '../src/engine/compile';
 import { Simulation } from '../src/engine/sim';
+import { readFileSync } from 'node:fs';
 import type { ModelConfig } from '../src/engine/types';
 
 const horizon = Number(process.argv[2] ?? 3600);
@@ -18,6 +19,11 @@ const cases: Array<[string, () => ModelConfig]> = [
 ];
 const picked = cases.filter(([label]) => !only || label.includes(only));
 if (!picked.length) throw new Error('Не найдено моделей для проверки.');
+const baseline = JSON.parse(readFileSync(new URL('../validation/dwell-baseline.json', import.meta.url), 'utf8')) as {
+  horizon: number; seeds: number[];
+  rows: Array<{ model: string; meanWait: number; exited: number; standing: number }>;
+};
+const baselineGate = horizon === baseline.horizon && seeds === baseline.seeds.length && !only;
 let failed = false;
 for (const [label, make] of picked) {
   const totals = { exited: 0, signal: 0, toParked: 0, visibility: 0, other: 0, maxStop: 0,
@@ -62,9 +68,23 @@ for (const [label, make] of picked) {
     } finally { sim.dispose(); }
   }
   const meanWait = totals.crossedStop ? totals.sumWait / totals.crossedStop : 0;
-  const bad = totals.toParked > 0 || totals.collisions > 0 || totals.deadlocks > 0
+  const reference = baseline.rows.find(row => row.model === label);
+  if (baselineGate && !reference) throw new Error(`Нет исходных показателей модели ${label}.`);
+  const standing = totals.visibility + totals.other;
+  const ratios = reference ? {
+    meanWait: reference.meanWait ? meanWait / reference.meanWait : meanWait === 0 ? 1 : null,
+    exited: reference.exited ? totals.exited / reference.exited : totals.exited === 0 ? 1 : null,
+    standing: reference.standing ? standing / reference.standing : standing === 0 ? 1 : null,
+  } : null;
+  const baselineFindings: string[] = [];
+  if (baselineGate && reference) {
+    if (meanWait > reference.meanWait * 1.10) baselineFindings.push('ожидание выше исходного более чем на 10 процентов');
+    if (totals.exited < reference.exited * 0.97) baselineFindings.push('проездов меньше 97 процентов исходного числа');
+    if (standing > reference.standing * 1.5 + 10) baselineFindings.push('остановок внутри перекрёстка больше допустимого');
+  }
+  const bad = baselineFindings.length > 0 || totals.toParked > 0 || totals.collisions > 0 || totals.deadlocks > 0
     || (failVisibility && totals.visibility > 0) || (label === 'worked' && (meanWait > 120 || totals.other > 20));
   failed ||= bad;
-  console.log(`${label}: ${JSON.stringify({ ...totals, meanWait, passed: !bad })}`);
+  console.log(`${label}: ${JSON.stringify({ ...totals, meanWait, standing, baselineGate, ratios, baselineFindings, passed: !bad })}`);
 }
 process.exitCode = failed ? 1 : 0;

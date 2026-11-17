@@ -45,3 +45,5 @@ dist/
 !/validation/repro-interlocking-v106.session.json
 !/validation/repro-interlocking-v106.replay.json
 /docs/validation-history.md
+
+!/validation/dwell-baseline.json

@@ -1,0 +1,84 @@
+{
+  "format": "crossroad-dwell-baseline",
+  "version": 1,
+  "horizon": 3600,
+  "seeds": [
+    42,
+    1042,
+    2042
+  ],
+  "rows": [
+    {
+      "model": "worked",
+      "meanWait": 82.7134371164505,
+      "exited": 4713,
+      "standing": 7
+    },
+    {
+      "model": "v1",
+      "meanWait": 86.34527761749816,
+      "exited": 4024,
+      "standing": 53
+    },
+    {
+      "model": "v1a",
+      "meanWait": 88.09125683612517,
+      "exited": 4039,
+      "standing": 53
+    },
+    {
+      "model": "v2",
+      "meanWait": 143.08490447868198,
+      "exited": 4034,
+      "standing": 55
+    },
+    {
+      "model": "v3",
+      "meanWait": 208.15761645231055,
+      "exited": 3835,
+      "standing": 4
+    },
+    {
+      "model": "v4",
+      "meanWait": 159.09127728727037,
+      "exited": 4046,
+      "standing": 63
+    },
+    {
+      "model": "v5",
+      "meanWait": 84.12906371883756,
+      "exited": 4155,
+      "standing": 56
+    },
+    {
+      "model": "worked",
+      "meanWait": 82.7134371164505,
+      "exited": 4713,
+      "standing": 7
+    },
+    {
+      "model": "kolpino",
+      "meanWait": 86.34527761749816,
+      "exited": 4024,
+      "standing": 53
+    },
+    {
+      "model": "cross4",
+      "meanWait": 30.771506362138492,
+      "exited": 3452,
+      "standing": 16
+    },
+    {
+      "model": "tee",
+      "meanWait": 16.22383546644977,
+      "exited": 2454,
+      "standing": 0
+    },
+    {
+      "model": "skew",
+      "meanWait": 29.888128012830364,
+      "exited": 2564,
+      "standing": 17
+    }
+  ]
+}
