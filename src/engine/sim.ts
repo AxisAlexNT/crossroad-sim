@@ -1,6 +1,6 @@
 import type { InteractiveFrame } from './interactiveRuntime';
 import { timeLoss } from './metrics';
-import { travelDistance } from './kinematics';
+import { travelDistance, stopPointAcceleration } from './kinematics';
 import { decidePriority } from './priority';
 import { compareArrivalOrder, type DemandId, type DemandEvent } from './demand';
 // Микросимуляция перекрёстка.
@@ -1438,6 +1438,20 @@ export class Simulation {
     return k === 'left' || k === 'uturn';
   }
 
+  private stagingStarts = new Map<number, number>();
+  private stagingClearance = new Map<string, boolean>();
+
+  private continuesOnYellow(veh: Vehicle, ci: number): boolean {
+    if (!this.yellowMain[ci] || veh.phase !== 'approach') return false;
+    const dStop = this.net.arms[veh.origin].cfg.approachLength - veh.s;
+    if (veh.v < 0.3 && dStop >= 0) return false;
+    if (veh.yellowDecision !== 0) return veh.yellowDecision === 1;
+    const lead = this.leaderIn(this.laneLists[veh.origin][veh.lane], veh);
+    const close = !!lead && lead.v > 3 && lead.s - lead.len - veh.s < veh.v * 1.5;
+    const canStop = dStop - 1 > veh.v * veh.v / (2 * 3.0) && dStop > veh.v * (close ? 2.0 : 1.5);
+    return !canStop || (veh.viol.red && dStop < veh.v * 3);
+  }
+
   /** Кто кому уступает: true — veh (манёвр A) уступает машине o (манёвр B) */
   private yieldsTo(veh: Vehicle, A: number, o: Vehicle, B: number): boolean {
     const ca = this.net.conns[A], cb = this.net.conns[B];
@@ -1452,7 +1466,8 @@ export class Simulation {
     const participant = (v: Vehicle, ci: number) => ({
       id: v.id, demand: v.demand, tWanted: v.tWanted, arm: this.net.conns[ci].conn.from.arm, left: this.isTurnLeft(ci),
       illegal: !!this.net.conns[ci].illegal,
-      clearing: v.phase === 'conn' && this.permit[ci] === 'none',
+      clearing: this.permit[ci] === 'none' && (v.phase === 'conn'
+        || (v.phase === 'approach' && (v.yellowDecision === 1 || this.continuesOnYellow(v, ci)))),
       arrow: (this.permit[ci] !== 'none' ? this.permit[ci] : v.entryPermit) === 'arrow',
     });
     return decidePriority(participant(veh, A), participant(o, B), this.rel.opposite, this.rel.onRight).yields;
@@ -1480,6 +1495,26 @@ export class Simulation {
     if (ta && !tb) return this.leftWaiting(cb.conn.from.arm, veh);
     if (!ta && tb) return this.leftWaiting(ca.conn.from.arm, veh);
     return false;
+  }
+
+  private sightBlocked(veh: Vehicle, movement: number): boolean {
+    const from = this.net.conns[movement].conn.from;
+    const arm = this.net.arms[from.arm];
+    const target = pointAt(arm.inLanes[from.lane], arm.cfg.approachLength - this.cfg.sim.normalVisibility).p;
+    return this.st.vehicles.some(other => {
+      if (other === veh || other.phase !== 'conn' || other.v >= 2 || other.s <= 1 || !this.isTurnLeft(other.conn)) return false;
+      const box = this.obbOf(other), c = Math.cos(box.h), s = Math.sin(box.h);
+      const local = (x: number, y: number) => ({ x: (x-box.cx)*c+(y-box.cy)*s, y: -(x-box.cx)*s+(y-box.cy)*c });
+      const a = local(veh.x,veh.y), b = local(target.x,target.y);
+      let lo=0, hi=1;
+      for (const [start, delta, bound] of [[a.x,b.x-a.x,box.hl],[a.y,b.y-a.y,box.hw]]) {
+        if (Math.abs(delta)<1e-9) { if(Math.abs(start)>bound)return false; continue; }
+        const t0=(-bound-start)/delta, t1=(bound-start)/delta;
+        lo=Math.max(lo,Math.min(t0,t1)); hi=Math.min(hi,Math.max(t0,t1));
+        if(lo>hi)return false;
+      }
+      return true;
+    });
   }
 
   /** Общий коридор включает длинные автобусы; короткие кузова могут разойтись. */
@@ -1628,14 +1663,16 @@ export class Simulation {
     const brk = this.cfg.sim.deadlockBreak;
     const stuck = brk > 0 && veh.phase === 'conn' && veh.stuckSince >= 0 && this.st.t - veh.stuckSince > brk;
     // стоящий водитель тронется только через своё время реакции
-    const lag = veh.v < 0.3 ? veh.reaction : 0;
+    const lag = veh.v < 0.3 && veh.haltT >= 0 && this.st.t - veh.haltT >= 1
+      ? Math.max(0, veh.reaction - (veh.goSince >= 0 ? Math.max(0, this.st.t - veh.goSince) : 0)) : 0;
     const myClear = this.timeToCover(dEnd + veh.len, veh.v, Math.max(1.2, veh.amax), 9) + lag;
     const myArrive = this.timeToCover(dStart, veh.v, Math.max(1.2, veh.amax), 9) + lag;
     const crit = this.isTurnLeft(A) ? sim.criticalGapLeft : sim.criticalGapOther;
-    const obstr = this.obstructed(veh, A);
+    const looked = veh.stopSince >= 0 && this.st.t - veh.stopSince >= 2;
+    const obstr = !looked && this.obstructed(veh, A) && this.sightBlocked(veh, B);
     const fromB = this.net.conns[B].conn.from;
     const oncoming = fromB.arm === this.rel.opposite[this.net.conns[A].conn.from.arm];
-    const occl = this.occluded(veh, A, B);
+    const occl = !looked && this.occluded(veh, A, B) && this.sightBlocked(veh, B);
     const vis = sim.obstructedVisibility;
     const sees = (dB: number) => (occl ? dStart <= vis && dB <= vis : dB <= sim.normalVisibility);
 
@@ -1655,7 +1692,7 @@ export class Simulation {
       for (const o of this.laneLists[fromB.arm]?.[fromB.lane] ?? []) {
         if (o.conn !== B && !(o.conn < 0 && this.net.connFor[fromB.arm][fromB.lane]?.[o.dest]?.includes(B))) continue;
         if (cf.body && !this.bodyConflictApplies(veh, A, o, B)) continue;
-        if (this.permit[B] === 'none' && !(this.yellowMain[B] && o.yellowDecision === 1)) continue;
+        if (this.permit[B] === 'none' && !(this.continuesOnYellow(o, B))) continue;
         const dB = L - o.s + bStart;
         if (!sees(dB)) continue;
         if (o.committed.includes(cr.conflict)
@@ -1673,6 +1710,11 @@ export class Simulation {
       }
     }
     for (const o of this.connLists[B]) {
+      // Два неподвижных встречных поворота могут разъехаться по раздельным коридорам.
+      if (veh.phase === 'conn' && o.phase === 'conn' && veh.v < 0.3 && o.v < 0.3
+        && oncoming && this.isTurnLeft(A) && this.isTurnLeft(B)
+        && !this.sweepHits(veh, A, veh.s, this.net.conns[A].path.length + veh.len, o)
+        && !this.sweepHits(o, B, o.s, this.net.conns[B].path.length + o.len, veh)) continue;
       if (cf.body && !this.bodyConflictApplies(veh, A, o, B)) continue;
       if (o.s >= bEnd + o.len) continue;
       if (o.crashed) continue;
@@ -1763,7 +1805,7 @@ export class Simulation {
       if (o.conn !== B && !(o.conn < 0 && this.net.connFor[fromB.arm][fromB.lane]?.[o.dest]?.includes(B))) continue;
       if (cf.body && !this.bodyConflictApplies(veh, A, o, B)) continue;
       const pB = this.permit[B];
-      const goesOnYellow = this.yellowMain[B] && o.yellowDecision === 1;
+      const goesOnYellow = this.continuesOnYellow(o, B);
       if (pB === 'none' && !goesOnYellow) continue;
       const dB = L - o.s + bStart;
       if (dB > 150) break;
@@ -1869,6 +1911,44 @@ export class Simulation {
    * Не въезжать в зону конфликта, если в перекрёстке есть машины встречного по этой зоне манёвра,
    * а сразу за зоной придётся остановиться и уступить: иначе машина встанет у них на пути, ПДД 13.2
    */
+  private hasStagingSpace(veh: Vehicle, ci: number): boolean {
+    const opposite = this.rel.opposite[this.net.conns[ci].conn.from.arm];
+    let first = this.stagingStarts.get(ci);
+    if (first === undefined) {
+      const origin = this.net.conns[ci].conn.from.arm;
+      first = Math.min(...this.net.conns[ci].conflicts.filter(ref => {
+        const other = this.net.conns[ref.other], conflict = this.net.conflicts[ref.conflict];
+        return other.conn.from.arm !== origin && (!opposite || other.conn.from.arm === opposite)
+          && !other.illegal && conflict.kind === 'cross' && !conflict.body;
+      }).map(ref => ref.start));
+      this.stagingStarts.set(ci, first);
+    }
+    if (!Number.isFinite(first)) return true;
+    const stop = first - 1 - veh.s0;
+    const key = `${ci}:${veh.len}:${veh.wid}:${veh.s0}:${veh.lat}:${veh.lat2}`;
+    const cached = this.stagingClearance.get(key);
+    if (cached !== undefined) return cached;
+    const probe = { ...veh, conn: ci, phase: 'conn' as const, s: stop, bayT: 0, bayShift: 0 };
+    this.pose(probe);
+    const length = Math.max(20, ...(this.cfg.transit?.routes ?? [])
+      .filter(r => r.enabled && (!opposite || r.from === opposite)).map(r => r.length));
+    let clear = true;
+    for (const other of this.net.conns) {
+      if (other.illegal || (opposite ? other.conn.from.arm !== opposite : other.conn.from.arm === this.net.conns[ci].conn.from.arm)) continue;
+      const envelope = { ...veh, conn: other.idx, phase: 'conn' as const,
+        origin: other.conn.from.arm, dest: other.conn.to.arm, lane: other.conn.from.lane,
+        outLane: other.conn.to.lane, len: length, wid: Math.max(...Object.values(VEH_WIDTH)), bayT: 0, bayShift: 0 };
+      for (const lat of [-1, 0, 1]) for (const lat2 of [-1, 0, 1]) {
+        envelope.lat = lat; envelope.lat2 = lat2;
+        if (this.sweepHits(envelope, other.idx, 0, other.path.length + envelope.len, probe)) { clear = false; break; }
+      }
+      if (!clear) break;
+    }
+    if (this.stagingClearance.size >= 2048) this.stagingClearance.delete(this.stagingClearance.keys().next().value!);
+    this.stagingClearance.set(key, clear);
+    return clear;
+  }
+
   private wouldStopInside(veh: Vehicle, ci: number, cr: ConflictRef, offset: number): boolean {
     this.blockZone = cr.conflict;
     const zone = this.net.conflicts[cr.conflict];
@@ -1878,8 +1958,8 @@ export class Simulation {
     // поперечным потоком. Фактическую занятость и очередь проверяет mustWait.
     // Кузовные пересечения дальше от входа по-прежнему требуют места за зоной.
     const sharedEntry = zone.body && zone.aStart === 0 && zone.bStart === 0;
-    if ((zone.kind === 'merge' || sharedEntry)
-      && this.net.conns[ci].conn.from.arm === this.net.conns[cr.other].conn.from.arm) return false;
+    if (this.net.conns[ci].conn.from.arm === this.net.conns[cr.other].conn.from.arm
+      && (sharedEntry || (zone.kind === 'merge' && this.hasStagingSpace(veh, ci)))) return false;
     if (zone.body && !this.st.vehicles.some(o => o !== veh && o.conn === cr.other && o.phase !== 'exit'
       && this.bodyConflictApplies(veh, ci, o, cr.other))) return false;
     // Не занимать пересекающийся поток, если неподвижный лидер не оставляет
@@ -1900,7 +1980,7 @@ export class Simulation {
     while (lo < hi) { const mid = (lo + hi) >>> 1; if (refs[mid].start <= cr.start) lo = mid + 1; else hi = mid; }
     for (let i = lo; i < refs.length; i++) {
       const c2 = refs[i];
-      if (c2.start > cr.end + veh.len + 0.5) break;
+      if (c2.start > cr.end + veh.len + 1 + veh.s0) break;
       if (veh.committed.includes(c2.conflict)) continue;
       if (this.mustWait(veh, ci, c2, offset + c2.start, offset + c2.end)) return true;
     }
@@ -2217,7 +2297,10 @@ export class Simulation {
     let a = Infinity;
     const take = (gap: number, vLead: number, why: Why = 'leader', who = -1) => {
       if (why === 'yield' && who >= 0) gap = this.clearYieldGap(veh, who, gap);
-      const acc = this.idm(veh, v0, gap, vLead);
+      let acc = this.idm(veh, v0, gap, vLead);
+      if (why === 'yield' && acc < 0 && veh.v > 0 && gap > veh.s0) {
+        acc = Math.min(acc, stopPointAcceleration(veh.v, gap - veh.s0, this.dt, B_MAX));
+      }
       if (acc < a) {
         a = acc; veh.why = why; veh.whyId = who;
         // Таймер начинается у хвоста очереди, а не только в последних
@@ -2374,6 +2457,16 @@ export class Simulation {
         if (dStop < 70 && (pm !== 'none' || veh.yellowDecision === 1)) {
           for (const cr of this.net.conns[veh.conn].conflicts) {
             if (veh.committed.includes(cr.conflict)) {
+              if (cr.start === 0 && this.net.conflicts[cr.conflict].kind === 'merge'
+                && this.net.conns[cr.other].conn.from.arm === veh.origin
+                && !this.hasStagingSpace(veh, veh.conn)
+                && this.wouldStopInside(veh, veh.conn, cr, dStop)) {
+                const gap = dStop + veh.s0 - 1;
+                if (gap - veh.s0 >= veh.v * veh.v / (2 * B_MAX) - 1e-9) {
+                  veh.yieldingAt = this.blockZone; veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind;
+                  take(gap, 0, 'yield', this.blockZone); break;
+                }
+              }
               // даже после решения проехать не въезжаем в стоящую в зоне машину
               if (this.zoneHeld(veh, cr)) { veh.yieldingAt = cr.conflict; veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind; take(dStop + cr.start - 0.8, 0, 'yield', cr.conflict); break; }
               continue;
@@ -2383,7 +2476,9 @@ export class Simulation {
             if (this.mustWait(veh, veh.conn, cr, ds, de) || this.wouldStopInside(veh, veh.conn, cr, dStop)) {
               veh.yieldingAt = this.blockZone;
               veh.yieldTo = this.blocker; veh.yieldKind = this.blockKind;
-              take(ds - 1.0 - (this.lateSight ? veh.v * REACTION : 0), 0, 'yield', this.blockZone);
+              const pointGap = cr.start === 0 && this.net.conflicts[cr.conflict].kind === 'merge'
+                && this.blockZone !== cr.conflict ? veh.s0 : 0;
+              take(ds + pointGap - 1.0 - (this.lateSight ? veh.v * REACTION : 0), 0, 'yield', this.blockZone);
               break;
             } else if (ds < (veh.v * veh.v) / (2 * veh.bcomf) + 1 + veh.s0 && !veh.committed.includes(cr.conflict)) veh.committed.push(cr.conflict);
           }
@@ -2563,9 +2658,14 @@ export class Simulation {
     if (veh.phase === 'approach') {
       const g = net.arms[veh.origin];
       const sc = veh.s - back;
-      p = pointAt(g.inLanes[veh.lane], sc);
+      // Передок входит в модель при s = 0, центр кузова ещё остаётся снаружи.
+      const atLane = (lane: number) => {
+        const q = pointAt(g.inLanes[lane], sc);
+        return sc < 0 ? { p: { x: q.p.x + Math.cos(q.h) * sc, y: q.p.y + Math.sin(q.h) * sc }, h: q.h } : q;
+      };
+      p = atLane(veh.lane);
       if (veh.lcT >= 0 && veh.lcFrom !== veh.lane) {
-        const q = pointAt(g.inLanes[veh.lcFrom], sc);
+        const q = atLane(veh.lcFrom);
         const k = veh.lcT * veh.lcT * (3 - 2 * veh.lcT);
         p = { p: { x: q.p.x + (p.p.x - q.p.x) * k, y: q.p.y + (p.p.y - q.p.y) * k }, h: p.h - Math.sin(Math.PI * veh.lcT) * 0.12 * Math.sign(veh.lane - veh.lcFrom) };
       }
@@ -2725,7 +2825,7 @@ export class Simulation {
       if (veh.phase !== 'approach' || veh.crashed) continue;
       if (veh.lcT >= 0) {
         veh.lcT += this.dt / LC_TIME;
-        if (veh.lcT >= 1) { veh.lcT = -1; veh.lcFrom = veh.lane; }
+        if (veh.lcT >= 1) { veh.lcT = -1; veh.lcFrom = veh.lane; this.index(); }
         continue;
       }
       const arm = this.net.arms[veh.origin];
@@ -2775,6 +2875,8 @@ export class Simulation {
           this.addLog('warn', 'viol-solid', `Машина #${veh.id} на подходе «${this.armName(veh.origin)}» перестроилась через сплошную линию разметки, нарушение ПДД`, undefined, veh.id);
         }
         if (veh.lane === veh.targetLane) veh.solidCross = false;
+        // Следующий водитель видит обе полосы уже начатого перестроения.
+        this.index();
       }
     }
   }

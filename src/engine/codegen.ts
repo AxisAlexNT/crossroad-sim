@@ -131,11 +131,15 @@ ${blocked}
 export function canExit(ctx: ExitContext): boolean {
   if (BLOCKED.some((b) => ctx.t >= b.from && ctx.t < b.to)) return false;
   if (CAPACITY_PER_LANE_VPH <= 0) return true;
-  const m = ctx.memory as { tokens?: number[]; last?: number };
+  const m = ctx.memory as { tokens?: number[]; lastTime?: number[] };
   m.tokens ??= [];
-  // «ведро с жетонами»: жетоны копятся со скоростью пропускной способности
+  m.lastTime ??= [];
+  // Пауза учитывается полностью, повторные проверки в одном времени не дают жетонов.
   const prev = m.tokens[ctx.lane] ?? 1;
-  const now = Math.min(1, prev + (CAPACITY_PER_LANE_VPH / 3600) * ctx.dt);
+  const last = m.lastTime[ctx.lane];
+  const elapsed = last === undefined ? ctx.dt : Math.max(0, ctx.t - last);
+  const now = Math.min(1, prev + (CAPACITY_PER_LANE_VPH / 3600) * elapsed);
+  m.lastTime[ctx.lane] = ctx.t;
   if (now >= 1) { m.tokens[ctx.lane] = now - 1; return true; }
   m.tokens[ctx.lane] = now;
   return false;

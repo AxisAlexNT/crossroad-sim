@@ -74,10 +74,15 @@ export function nativeExit(p: ExitParams): ExitFn {
   return (ctx) => {
     if (blocked.some((b) => ctx.t >= b.from && ctx.t < b.to)) return false;
     if (cap <= 0) return true;
-    const m = ctx.memory as { tokens?: number[] };
+    const m = ctx.memory as { tokens?: number[]; lastTime?: number[] };
     if (!m.tokens) m.tokens = [];
+    if (!m.lastTime) m.lastTime = [];
     const prev = m.tokens[ctx.lane] ?? 1;
-    const now = Math.min(1, prev + (cap / 3600) * ctx.dt);
+    const last = m.lastTime[ctx.lane];
+    // Пауза между попытками не теряется, повторный вызов в том же шаге не даёт новых жетонов.
+    const elapsed = last === undefined ? ctx.dt : Math.max(0, ctx.t - last);
+    const now = Math.min(1, prev + (cap / 3600) * elapsed);
+    m.lastTime[ctx.lane] = ctx.t;
     if (now >= 1) { m.tokens[ctx.lane] = now - 1; return true; }
     m.tokens[ctx.lane] = now;
     return false;

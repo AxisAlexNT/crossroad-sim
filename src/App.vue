@@ -101,6 +101,7 @@ onMounted(async () => {
       </button>
     </nav>
     <main>
+      <p class="preview-notice" role="status">Предварительная сборка. Полная проверка выпуска не завершена. Для пятого варианта временно принято превышение задержки на 10,97% при исходном пределе 10%.</p>
       <SimTab v-show="app.tab === 'sim'" ref="simTab" />
       <EventsTab v-if="app.tab === 'events'" />
       <ChartsTab v-show="app.tab === 'charts'" />
